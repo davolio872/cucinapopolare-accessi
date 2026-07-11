@@ -23,7 +23,14 @@ import type {
   User,
 } from "@/types";
 
-type SectionId = "dashboard" | "prenotazioni" | "ingresso" | "utenti" | "importa";
+type SectionId =
+  | "dashboard"
+  | "prenotazioni"
+  | "ingresso"
+  | "calendario"
+  | "statistiche"
+  | "utenti"
+  | "importa";
 
 const storageKey = "cucina-popolare-demo-state-v1";
 const today = todayKey();
@@ -32,6 +39,8 @@ const sections: { id: SectionId; label: string; icon: string }[] = [
   { id: "dashboard", label: "Dashboard", icon: "⌂" },
   { id: "prenotazioni", label: "Prenotazioni", icon: "✓" },
   { id: "ingresso", label: "Nuovo ingresso", icon: "+" },
+  { id: "calendario", label: "Calendario", icon: "C" },
+  { id: "statistiche", label: "Statistiche", icon: "%" },
   { id: "utenti", label: "Anagrafica", icon: "◉" },
   { id: "importa", label: "Importa Excel", icon: "⇩" },
 ];
@@ -63,6 +72,45 @@ function matchesUser(user: User, query: string) {
     .join(" ")
     .toLowerCase()
     .includes(needle);
+}
+
+function formatDateKey(dateKey: string) {
+  return new Intl.DateTimeFormat("it-IT", {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(new Date(`${dateKey}T00:00:00`));
+}
+
+function currentMonthKey() {
+  return today.slice(0, 7);
+}
+
+function getMonthDays(monthKey: string) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const days = new Date(year, month, 0).getDate();
+  return Array.from({ length: days }, (_, index) => {
+    const day = String(index + 1).padStart(2, "0");
+    return `${monthKey}-${day}`;
+  });
+}
+
+function countStatus(entries: DailyEntry[], status: AttendanceStatus) {
+  return entries.filter((entry) => entry.status === status).length;
+}
+
+function channelLabel(channel?: DailyEntry["bookingChannel"]) {
+  if (channel === "sms") return "SMS";
+  if (channel === "whatsapp") return "WhatsApp";
+  if (channel === "telefono") return "Telefono";
+  if (channel === "manuale") return "Manuale";
+  return "-";
+}
+
+function percent(part: number, total: number) {
+  if (!total) return 0;
+  return Math.round((part / total) * 100);
 }
 
 export function CucinaApp({
@@ -324,6 +372,12 @@ export function CucinaApp({
                 onBook={bookUser}
                 onRegister={registerWalkIn}
               />
+            ) : null}
+            {activeSection === "calendario" ? (
+              <CalendarHistory users={state.users} entries={state.entries} />
+            ) : null}
+            {activeSection === "statistiche" ? (
+              <Statistics users={state.users} entries={state.entries} />
             ) : null}
             {activeSection === "utenti" ? (
               <UsersRegistry
@@ -606,6 +660,245 @@ function NewEntry({
             <p className="mt-4 text-zinc-700">Seleziona una persona dai risultati.</p>
           )}
         </div>
+      </div>
+    </section>
+  );
+}
+
+function CalendarHistory({ users, entries }: { users: User[]; entries: DailyEntry[] }) {
+  const [month, setMonth] = useState(currentMonthKey());
+  const [selectedDate, setSelectedDate] = useState(today);
+  const [query, setQuery] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const monthDays = useMemo(() => getMonthDays(month), [month]);
+  const filteredUsers = useMemo(
+    () => sortUsers(users.filter((user) => matchesUser(user, query))).slice(0, 10),
+    [query, users],
+  );
+  const selectedDayEntries = entries.filter((entry) => entry.date === selectedDate);
+  const selectedUser = users.find((user) => user.id === selectedUserId);
+  const selectedUserHistory = selectedUser
+    ? entries
+        .filter((entry) => entry.userId === selectedUser.id)
+        .sort((a, b) => b.date.localeCompare(a.date))
+    : [];
+
+  return (
+    <section>
+      <SectionHeader
+        title="Calendario e storico"
+        description="Consulta le prenotazioni per giorno e lo storico completo di ogni persona registrata."
+      />
+      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className="rounded-md border-2 border-black bg-white p-4">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <label>
+              <span className="text-sm font-bold">Mese</span>
+              <input
+                type="month"
+                value={month}
+                onChange={(event) => {
+                  setMonth(event.target.value);
+                  setSelectedDate(`${event.target.value}-01`);
+                }}
+                className="mt-1 h-11 rounded-md border-2 border-black px-3"
+              />
+            </label>
+            <div className="grid grid-cols-4 gap-2 text-sm sm:w-96">
+              <Metric label="Pren." value={countStatus(selectedDayEntries, "Prenotato")} small />
+              <Metric label="Pres." value={countStatus(selectedDayEntries, "Presente")} small />
+              <Metric label="Ass." value={countStatus(selectedDayEntries, "Assente")} small />
+              <Metric label="Extra" value={countStatus(selectedDayEntries, "Senza prenotazione")} small />
+            </div>
+          </div>
+          <div className="grid grid-cols-7 gap-2">
+            {monthDays.map((day) => {
+              const dayEntries = entries.filter((entry) => entry.date === day);
+              const isSelected = day === selectedDate;
+              return (
+                <button
+                  key={day}
+                  type="button"
+                  onClick={() => setSelectedDate(day)}
+                  className={`min-h-20 rounded-md border-2 border-black p-2 text-left transition ${
+                    isSelected ? "bg-yellow-400" : "bg-white hover:bg-yellow-100"
+                  }`}
+                >
+                  <span className="block text-sm font-bold">{day.slice(-2)}</span>
+                  <span className="mt-2 block text-xs text-zinc-700">
+                    {dayEntries.length ? `${dayEntries.length} mov.` : "-"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-5">
+            <h2 className="mb-3 text-xl font-bold">{formatDateKey(selectedDate)}</h2>
+            <ResponsiveTable
+              headers={["Tessera", "Nome", "Cognome", "Stato", "Canale", "Ora"]}
+              rows={selectedDayEntries
+                .map((entry) => ({
+                  entry,
+                  user: users.find((user) => user.id === entry.userId),
+                }))
+                .filter((row): row is { entry: DailyEntry; user: User } => Boolean(row.user))
+                .map(({ entry, user }) => [
+                  user.cardNumber,
+                  user.firstName,
+                  user.lastName,
+                  <Badge key="badge" status={entry.status} />,
+                  channelLabel(entry.bookingChannel),
+                  entry.entryTime || "-",
+                ])}
+            />
+          </div>
+        </div>
+
+        <div className="rounded-md border-2 border-black bg-white p-4">
+          <h2 className="text-xl font-bold">Storico persona</h2>
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            className="mt-3 h-12 w-full rounded-md border-2 border-black px-3"
+            placeholder="Cerca nome, tessera o telefono"
+          />
+          <div className="mt-3 grid max-h-72 gap-2 overflow-y-auto">
+            {filteredUsers.map((user) => (
+              <button
+                key={user.id}
+                type="button"
+                onClick={() => setSelectedUserId(user.id)}
+                className={`rounded-md border-2 border-black p-3 text-left ${
+                  selectedUserId === user.id ? "bg-yellow-100" : "bg-white hover:bg-yellow-100"
+                }`}
+              >
+                <span className="block font-bold">
+                  {user.cardNumber} - {user.firstName} {user.lastName}
+                </span>
+                <span className="text-sm text-zinc-700">{user.phone || "Telefono non indicato"}</span>
+              </button>
+            ))}
+          </div>
+          {selectedUser ? (
+            <div className="mt-5">
+              <h3 className="font-bold">
+                {selectedUser.firstName} {selectedUser.lastName}
+              </h3>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Metric label="Totale" value={selectedUserHistory.length} small />
+                <Metric label="Presenze" value={countStatus(selectedUserHistory, "Presente")} small />
+              </div>
+              <div className="mt-4">
+                <ResponsiveTable
+                  headers={["Data", "Stato", "Canale", "Ora"]}
+                  rows={selectedUserHistory.map((entry) => [
+                    formatDateKey(entry.date),
+                    <Badge key="badge" status={entry.status} />,
+                    channelLabel(entry.bookingChannel),
+                    entry.entryTime || "-",
+                  ])}
+                />
+              </div>
+            </div>
+          ) : (
+            <p className="mt-4 text-zinc-700">Seleziona una persona per vedere lo storico.</p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Statistics({ users, entries }: { users: User[]; entries: DailyEntry[] }) {
+  const bookedLike = entries.filter((entry) => entry.status === "Prenotato" || entry.status === "Presente");
+  const present = countStatus(entries, "Presente");
+  const absent = countStatus(entries, "Assente");
+  const walkIns = countStatus(entries, "Senza prenotazione");
+  const channels: { label: string; value: number }[] = [
+    ["Manuale", entries.filter((entry) => entry.bookingChannel === "manuale").length],
+    ["SMS", entries.filter((entry) => entry.bookingChannel === "sms").length],
+    ["WhatsApp", entries.filter((entry) => entry.bookingChannel === "whatsapp").length],
+    ["Telefono", entries.filter((entry) => entry.bookingChannel === "telefono").length],
+  ].map(([label, value]) => ({ label: String(label), value: Number(value) }));
+  const maxChannel = Math.max(1, ...channels.map((channel) => channel.value));
+  const activeUsers = users.filter((user) => user.active).length;
+  const dates = Array.from(new Set(entries.map((entry) => entry.date))).sort();
+  const recentDates = dates.slice(-14);
+  const topUsers = users
+    .map((user) => ({
+      user,
+      entries: entries.filter((entry) => entry.userId === user.id),
+    }))
+    .filter((row) => row.entries.length > 0)
+    .sort((a, b) => b.entries.length - a.entries.length)
+    .slice(0, 8);
+
+  return (
+    <section>
+      <SectionHeader
+        title="Statistiche"
+        description="Leggi andamento, presenze, assenze e canali di prenotazione sullo storico disponibile."
+      />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <Metric label="Utenti attivi" value={activeUsers} />
+        <Metric label="Movimenti totali" value={entries.length} />
+        <Metric label="Presenze" value={present} />
+        <Metric label="Assenze" value={absent} />
+        <Metric label="Tasso presenza" value={`${percent(present, bookedLike.length + absent)}%`} />
+      </div>
+      <div className="mt-6 grid gap-5 xl:grid-cols-2">
+        <div className="rounded-md border-2 border-black bg-white p-4">
+          <h2 className="text-xl font-bold">Canali di prenotazione</h2>
+          <div className="mt-4 space-y-3">
+            {channels.map((channel) => (
+              <div key={channel.label}>
+                <div className="mb-1 flex items-center justify-between text-sm font-bold">
+                  <span>{channel.label}</span>
+                  <span>{channel.value}</span>
+                </div>
+                <div className="h-4 rounded-md border-2 border-black bg-white">
+                  <div
+                    className="h-full bg-yellow-400"
+                    style={{ width: `${Math.max(4, percent(channel.value, maxChannel))}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-sm text-zinc-700">
+            Ingressi senza prenotazione: {walkIns}
+          </p>
+        </div>
+        <div className="rounded-md border-2 border-black bg-white p-4">
+          <h2 className="text-xl font-bold">Andamento recente</h2>
+          <ResponsiveTable
+            headers={["Data", "Pren.", "Pres.", "Ass.", "Extra"]}
+            rows={recentDates.map((date) => {
+              const dayEntries = entries.filter((entry) => entry.date === date);
+              return [
+                formatDateKey(date),
+                countStatus(dayEntries, "Prenotato"),
+                countStatus(dayEntries, "Presente"),
+                countStatus(dayEntries, "Assente"),
+                countStatus(dayEntries, "Senza prenotazione"),
+              ];
+            })}
+          />
+        </div>
+      </div>
+      <div className="mt-6 rounded-md border-2 border-black bg-white p-4">
+        <h2 className="mb-4 text-xl font-bold">Persone piu presenti nello storico</h2>
+        <ResponsiveTable
+          headers={["Tessera", "Nome", "Cognome", "Movimenti", "Presenze", "Assenze"]}
+          rows={topUsers.map(({ user, entries: userEntries }) => [
+            user.cardNumber,
+            user.firstName,
+            user.lastName,
+            userEntries.length,
+            countStatus(userEntries, "Presente"),
+            countStatus(userEntries, "Assente"),
+          ])}
+        />
       </div>
     </section>
   );
