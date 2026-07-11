@@ -1,6 +1,6 @@
 # Cucina Popolare Genovese
 
-Demo web app in italiano per gestire prenotazioni giornaliere, ingressi, anagrafica utenti e importazione da Excel/CSV.
+Web app in italiano per gestire anagrafica, prenotazioni giornaliere, ingressi e importazione Excel/CSV della Cucina Popolare Genovese.
 
 ## Installazione
 
@@ -23,40 +23,32 @@ pnpm lint
 pnpm build
 ```
 
-Il progetto usa Next.js App Router, TypeScript, Tailwind CSS e la libreria `xlsx`.
+Il progetto usa Next.js App Router, TypeScript, Tailwind CSS, Supabase Auth/Database e `xlsx`.
 
-## Formato Excel o CSV
+## Login
 
-Il file può essere `.xlsx`, `.xls` o `.csv`, massimo 5 MB e 2.000 righe.
+Pagina pubblica:
 
-Colonne consigliate:
+- `/login`
 
-- `numero_tessera`
-- `nome`
-- `cognome`
-- `telefono`
-- `attivo`
-- `note`
+Pagine protette:
 
-Sono accettate anche intestazioni alternative come `Numero tessera`, `Tessera`, `Numero`, `Nome`, `Cognome`, `Telefono`, `Cellulare`, `Attivo`, `Stato`, `Note`.
+- `/`
+- `/test-supabase`
+- dashboard, prenotazioni, nuovo ingresso, anagrafica e import Excel
 
-Il campo `attivo` accetta `sì`, `si`, `no`, `true`, `false`, `1`, `0`, `attivo`, `non attivo`.
+Credenziali demo locali:
 
-Nella pagina "Importa da Excel" è disponibile il pulsante "Scarica modello Excel", che genera `modello_utenti_cucina_popolare.xlsx` con due righe di esempio. Le colonne numero tessera e telefono sono trattate come testo.
+```text
+nome utente: admin
+password demo: 1234
+```
 
-## Pubblicazione su Vercel
+Il login demo usa dati fittizi nel `localStorage`. Per usare dati reali, accedi con un volontario creato in Supabase Auth e con record attivo in `profiles`.
 
-1. Crea un repository GitHub e carica il progetto.
-2. Accedi a Vercel e scegli "Add New Project".
-3. Importa il repository GitHub.
-4. Lascia le impostazioni predefinite per Next.js.
-5. Avvia il deploy.
+## Supabase
 
-Non servono variabili ambiente obbligatorie: la chiave pubblicabile Supabase è già configurata per questa demo.
-
-## Collegamento Supabase
-
-Il progetto è collegato al Supabase `upsqhkvlpxowsdoihpth`.
+Il progetto e collegato al Supabase `upsqhkvlpxowsdoihpth`.
 
 Variabili consigliate per locale e Vercel:
 
@@ -67,40 +59,17 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_R0dXZVu6DAbY2z2u8p7U4g_IIPcs
 
 Sono chiavi pubblicabili: non usare mai `service_role` o chiavi secret nel browser.
 
-La demo mantiene ancora i dati operativi nel browser con `localStorage`. Il collegamento Supabase resta disponibile a livello di progetto e schema, ma l'accesso principale al gestionale passa dal login iniziale.
-
-PIN iniziale per i test:
+Per applicare il modello dati, apri Supabase SQL Editor ed esegui tutto il contenuto di:
 
 ```text
-cucina2026
+supabase/schema.sql
 ```
 
-Lo schema applicato è in `supabase/schema.sql`. Le tabelle hanno RLS attivo e non sono accessibili direttamente con la chiave pubblicabile; le funzioni RPC `cpg_get_state` e `cpg_save_state` restano disponibili per test dati protetti da PIN.
+Lo schema abilita RLS. Gli utenti anonimi non accedono ai dati operativi; i volontari autenticati e attivi possono gestire anagrafica, prenotazioni, ingressi, contatti e log comunicazioni.
 
-Per cambiare PIN in Supabase:
+## Volontari
 
-```sql
-update public.cpg_app_config
-set value = extensions.crypt('nuovo-pin', extensions.gen_salt('bf')),
-    updated_at = now()
-where key = 'access_pin_hash';
-```
-
-## Autenticazione volontari
-
-L'app protegge tutte le pagine operative con Supabase Auth email/password e cookie SSR tramite `@supabase/ssr`.
-
-Pagine protette:
-
-- `/`
-- `/test-supabase`
-- tutte le sezioni operative interne: dashboard, prenotazioni, nuovo ingresso, anagrafica e import Excel
-
-Pagina pubblica:
-
-- `/login`
-
-### 1. Attivare email/password
+### Attivare email/password
 
 Nel pannello Supabase:
 
@@ -109,28 +78,21 @@ Nel pannello Supabase:
 3. Abilita Email.
 4. Abilita Email + Password.
 
-### 2. Disabilitare temporaneamente la registrazione pubblica
+### Disabilitare la registrazione pubblica
 
-Nel pannello Supabase:
-
-1. Vai in Authentication.
-2. Apri Providers oppure Settings, in base alla vista Supabase.
-3. Disabilita le registrazioni pubbliche se l'opzione è disponibile nel progetto.
+Nel pannello Supabase, disabilita le registrazioni pubbliche se l'opzione e disponibile nel progetto.
 
 In questa app non esiste una pagina di registrazione: i volontari vengono creati manualmente.
 
-### 3. Creare manualmente un volontario
-
-Nel pannello Supabase:
+### Creare un volontario
 
 1. Vai in Authentication > Users.
 2. Crea un nuovo utente.
 3. Inserisci email e password temporanea.
-4. Conferma l'email se il progetto richiede conferma prima del login.
+4. Conferma l'email se richiesto dal progetto.
+5. Copia l'`id` utente.
 
-### 4. Inserire il profilo
-
-Dopo aver creato l'utente, copia il suo `id` e inserisci il profilo:
+Inserisci il profilo:
 
 ```sql
 insert into public.profiles (id, nome, cognome, ruolo, attivo)
@@ -156,38 +118,79 @@ set attivo = false
 where id = 'UUID_UTENTE_AUTH';
 ```
 
-### 5. Testare login e logout
+## Prenotazioni Reali
 
-Credenziali demo consigliate:
+La base dati operativa usa queste tabelle:
 
-```text
-nome utente: admin
-password demo: 1234
+- `cpg_users`: persone registrate, numero tessera, telefono, stato attivo e note.
+- `cpg_daily_entries`: prenotazioni e ingressi giornalieri, con vincolo unico su persona + data.
+- `cpg_contacts`: numeri abilitati per SMS, WhatsApp e telefono.
+- `cpg_communication_logs`: log dei messaggi/chiamate in entrata e in uscita.
+- `cpg_booking_settings`: capienza giornaliera e lista di attesa.
+- `cpg_waitlist`: richieste oltre capienza.
+
+Dal gestionale:
+
+1. Accedi con un volontario Supabase reale.
+2. Vai in "Anagrafica" e crea o importa le persone registrate.
+3. Vai in "Nuovo ingresso".
+4. Cerca una persona.
+5. Usa "Prenota per oggi" per creare la prenotazione manuale.
+6. Usa "Registra ingresso" quando la persona arriva.
+
+La prenotazione manuale salva `booking_channel = 'manuale'`.
+
+## Predisposizione SMS, WhatsApp E Telefono
+
+Lo schema contiene gia la funzione:
+
+```sql
+public.cpg_request_booking_by_phone(
+  p_phone_e164 text,
+  p_channel text,
+  p_entry_date date default current_date,
+  p_body text default null,
+  p_provider_message_id text default null
+)
 ```
 
-Questo accesso demo usa un cookie httpOnly lato server e serve solo per provare il gestionale. Per test con volontari reali, crea utenti Supabase Auth con email/password robuste.
+Canali ammessi:
 
-1. Apri `/login`.
-2. Inserisci email e password del volontario.
-3. Dopo l'accesso viene mostrata la dashboard.
-4. Nell'intestazione compaiono nome, email e pulsante "Esci".
-5. Premi "Esci": l'app torna a `/login`.
+- `sms`
+- `whatsapp`
+- `telefono`
 
-### 6. Verificare protezione pagine
+La funzione riconosce il numero in `cpg_contacts`, verifica che la persona sia attiva, controlla la capienza giornaliera, crea o aggiorna la prenotazione, registra il log comunicazione e mette in lista di attesa quando la capienza e esaurita.
 
-Da browser anonimo o dopo logout:
+Non e esposta agli utenti anonimi. Il prossimo passaggio sara creare endpoint server-side protetti da segreto provider per ricevere webhook Twilio/WhatsApp/telefonia e chiamare questa funzione.
 
-- aprendo `/` si viene reindirizzati a `/login`;
-- aprendo `/test-supabase` si viene reindirizzati a `/login`;
-- visitando `/login` mentre si è già autenticati si torna alla dashboard.
+## Formato Excel O CSV
 
-### 7. Aggiungere altri operatori
+Il file puo essere `.xlsx`, `.xls` o `.csv`, massimo 5 MB e 2.000 righe.
 
-Ripeti la creazione manuale dell'utente in Authentication > Users e inserisci un record corrispondente in `profiles`.
+Colonne consigliate:
 
-## Limiti della versione demo
+- `numero_tessera`
+- `nome`
+- `cognome`
+- `telefono`
+- `attivo`
+- `note`
 
-- Non ha autenticazione reale.
-- La modalità locale usa dati fittizi nel `localStorage`.
-- La modalità Supabase permette test condivisi con dati reali, ma il PIN non sostituisce un sistema di autenticazione completo.
-- Non include QR code, notifiche, SMS, WhatsApp, PDF, ruoli o permessi avanzati.
+Sono accettate anche intestazioni alternative come `Numero tessera`, `Tessera`, `Numero`, `Nome`, `Cognome`, `Telefono`, `Cellulare`, `Attivo`, `Stato`, `Note`.
+
+Il campo `attivo` accetta `si`, `no`, `true`, `false`, `1`, `0`, `attivo`, `non attivo`.
+
+## Pubblicazione Su Vercel
+
+1. Carica il progetto su GitHub.
+2. Importa il repository in Vercel.
+3. Configura le variabili Supabase consigliate.
+4. Avvia il deploy.
+
+## Limiti Attuali
+
+- Il login demo usa dati fittizi nel `localStorage`.
+- I dati reali richiedono accesso con volontario Supabase Auth e profilo attivo.
+- Gli endpoint SMS, WhatsApp e telefonia non sono ancora collegati al provider.
+- Non include ancora invio notifiche, QR code, PDF o permessi amministrativi avanzati.

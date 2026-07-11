@@ -19,6 +19,9 @@ export type DailyEntry = {
   status: AttendanceStatus;
   entryTime?: string;
   date: string;
+  bookingChannel?: "manuale" | "sms" | "whatsapp" | "telefono";
+  sourcePhone?: string;
+  bookedAt?: string;
 };
 
 export type AppState = {

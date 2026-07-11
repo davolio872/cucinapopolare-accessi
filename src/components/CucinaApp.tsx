@@ -3,8 +3,15 @@
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { createDemoState } from "@/data/demo-data";
+import {
+  deleteOperationalUser,
+  upsertOperationalEntry,
+  upsertOperationalUser,
+  upsertOperationalUsers,
+} from "@/lib/cpg-data";
 import { currentTime, formatItalianDate, todayKey } from "@/lib/dates";
 import { applyImport, downloadTemplate, parseImportFile } from "@/lib/excel";
+import { createClient } from "@/lib/supabase/client";
 import type { AuthenticatedVolunteer } from "@/lib/supabase/server";
 import type {
   AppState,
@@ -58,17 +65,31 @@ function matchesUser(user: User, query: string) {
     .includes(needle);
 }
 
-export function CucinaApp({ volunteer }: { volunteer: AuthenticatedVolunteer }) {
+export function CucinaApp({
+  volunteer,
+  initialState,
+  dataMode,
+}: {
+  volunteer: AuthenticatedVolunteer;
+  initialState: AppState;
+  dataMode: "demo" | "supabase";
+}) {
   const [activeSection, setActiveSection] = useState<SectionId>("dashboard");
-  const [state, setState] = useState<AppState>(() => createDemoState(today));
-  const [loaded, setLoaded] = useState(false);
+  const [state, setState] = useState<AppState>(() => initialState);
+  const [loaded, setLoaded] = useState(dataMode === "supabase");
   const [notice, setNotice] = useState("");
+  const [saving, setSaving] = useState(false);
+  const supabase = useMemo(
+    () => (dataMode === "supabase" ? createClient() : null),
+    [dataMode],
+  );
   const todayEntries = useMemo(
     () => state.entries.filter((entry) => entry.date === today),
     [state.entries],
   );
 
   useEffect(() => {
+    if (dataMode !== "demo") return;
     const timer = window.setTimeout(() => {
       const saved = window.localStorage.getItem(storageKey);
       if (saved) {
@@ -82,13 +103,13 @@ export function CucinaApp({ volunteer }: { volunteer: AuthenticatedVolunteer }) 
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [dataMode]);
 
   useEffect(() => {
-    if (loaded) {
+    if (dataMode === "demo" && loaded) {
       window.localStorage.setItem(storageKey, JSON.stringify(state));
     }
-  }, [loaded, state]);
+  }, [dataMode, loaded, state]);
 
   function showNotice(message: string) {
     setNotice(message);
@@ -102,21 +123,46 @@ export function CucinaApp({ volunteer }: { volunteer: AuthenticatedVolunteer }) 
     });
   }
 
+  function persist(action: () => Promise<unknown>) {
+    if (!supabase) return;
+    setSaving(true);
+    void action()
+      .catch(() => {
+        showNotice("Salvataggio non riuscito. Controlla connessione e permessi Supabase.");
+      })
+      .finally(() => setSaving(false));
+  }
+
   function setEntry(userId: string, status: AttendanceStatus, entryTime?: string) {
+    const existing = state.entries.find(
+      (entry) => entry.userId === userId && entry.date === today,
+    );
+    const nextEntry: DailyEntry = {
+      ...existing,
+      userId,
+      status,
+      date: today,
+      entryTime,
+      bookingChannel:
+        existing?.bookingChannel ?? (status === "Prenotato" ? "manuale" : undefined),
+      bookedAt:
+        existing?.bookedAt ?? (status === "Prenotato" ? new Date().toISOString() : undefined),
+    };
+
     commitState((previous) => {
-      const existing = previous.entries.find(
+      const current = previous.entries.find(
         (entry) => entry.userId === userId && entry.date === today,
       );
-      const nextEntry: DailyEntry = { userId, status, date: today, entryTime };
       return {
         ...previous,
-        entries: existing
+        entries: current
           ? previous.entries.map((entry) =>
               entry.userId === userId && entry.date === today ? nextEntry : entry,
             )
           : [...previous.entries, nextEntry],
       };
     });
+    persist(() => upsertOperationalEntry(supabase!, nextEntry));
   }
 
   function registerPresence(userId: string) {
@@ -139,6 +185,20 @@ export function CucinaApp({ volunteer }: { volunteer: AuthenticatedVolunteer }) 
     showNotice(entry ? "Prenotazione confermata come presente." : "Ingresso senza prenotazione registrato.");
   }
 
+  function bookUser(user: User) {
+    if (!user.active) {
+      showNotice("Utente non attivo: prenotazione non consentita.");
+      return;
+    }
+    const entry = todayEntries.find((item) => item.userId === user.id);
+    if (entry) {
+      showNotice("Esiste gia una prenotazione o registrazione per oggi.");
+      return;
+    }
+    setEntry(user.id, "Prenotato");
+    showNotice("Prenotazione registrata.");
+  }
+
   function upsertUser(formUser: Omit<User, "id">, editingId?: string) {
     const duplicated = state.users.some(
       (user) => user.cardNumber === formUser.cardNumber && user.id !== editingId,
@@ -147,12 +207,17 @@ export function CucinaApp({ volunteer }: { volunteer: AuthenticatedVolunteer }) 
       showNotice("Numero tessera già presente. Inserisci un valore univoco.");
       return false;
     }
+    const nextUser: User = editingId
+      ? { id: editingId, ...formUser }
+      : { id: `u-${crypto.randomUUID()}`, ...formUser };
+
     commitState((previous) => ({
       ...previous,
       users: editingId
-        ? previous.users.map((user) => (user.id === editingId ? { ...user, ...formUser } : user))
-        : [...previous.users, { id: `u-${crypto.randomUUID()}`, ...formUser }],
+        ? previous.users.map((user) => (user.id === editingId ? nextUser : user))
+        : [...previous.users, nextUser],
     }));
+    persist(() => upsertOperationalUser(supabase!, nextUser));
     showNotice(editingId ? "Utente aggiornato." : "Nuovo utente creato.");
     return true;
   }
@@ -164,16 +229,22 @@ export function CucinaApp({ volunteer }: { volunteer: AuthenticatedVolunteer }) 
       users: previous.users.filter((user) => user.id !== userId),
       entries: previous.entries.filter((entry) => entry.userId !== userId),
     }));
+    persist(() => deleteOperationalUser(supabase!, userId));
     showNotice("Utente eliminato.");
   }
 
   function deactivateUser(userId: string) {
+    const current = state.users.find((user) => user.id === userId);
+    if (!current) return;
+    const nextUser = { ...current, active: !current.active };
+
     commitState((previous) => ({
       ...previous,
       users: previous.users.map((user) =>
-        user.id === userId ? { ...user, active: !user.active } : user,
+        user.id === userId ? nextUser : user,
       ),
     }));
+    persist(() => upsertOperationalUser(supabase!, nextUser));
   }
 
   const stats = {
@@ -209,6 +280,13 @@ export function CucinaApp({ volunteer }: { volunteer: AuthenticatedVolunteer }) 
               </div>
               <div className="hidden md:block">
                 <p className="text-sm font-medium capitalize text-zinc-700">{formatItalianDate()}</p>
+                <p className="text-xs font-semibold text-zinc-600">
+                  {dataMode === "supabase"
+                    ? saving
+                      ? "Supabase: salvataggio..."
+                      : "Supabase: dati reali"
+                    : "Modalita demo locale"}
+                </p>
               </div>
               <UserMenu volunteer={volunteer} />
               <select
@@ -240,7 +318,12 @@ export function CucinaApp({ volunteer }: { volunteer: AuthenticatedVolunteer }) 
               <Bookings users={state.users} entries={todayEntries} onRegister={registerPresence} />
             ) : null}
             {activeSection === "ingresso" ? (
-              <NewEntry users={state.users} entries={todayEntries} onRegister={registerWalkIn} />
+              <NewEntry
+                users={state.users}
+                entries={todayEntries}
+                onBook={bookUser}
+                onRegister={registerWalkIn}
+              />
             ) : null}
             {activeSection === "utenti" ? (
               <UsersRegistry
@@ -256,6 +339,7 @@ export function CucinaApp({ volunteer }: { volunteer: AuthenticatedVolunteer }) 
                 onApply={(preview, strategy) => {
                   const result = applyImport(state.users, preview, strategy);
                   commitState((previous) => ({ ...previous, users: result.users }));
+                  persist(() => upsertOperationalUsers(supabase!, result.users));
                   showNotice("Importazione completata.");
                   return result.summary;
                 }}
@@ -432,10 +516,12 @@ function Bookings({
 function NewEntry({
   users,
   entries,
+  onBook,
   onRegister,
 }: {
   users: User[];
   entries: DailyEntry[];
+  onBook: (user: User) => void;
   onRegister: (user: User) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -448,6 +534,7 @@ function NewEntry({
   const selectedEntry = selected ? entries.find((entry) => entry.userId === selected.id) : undefined;
   const alreadyRegistered =
     selectedEntry?.status === "Presente" || selectedEntry?.status === "Senza prenotazione";
+  const alreadyBooked = Boolean(selectedEntry);
 
   return (
     <section>
@@ -498,6 +585,14 @@ function NewEntry({
                 Stato oggi:{" "}
                 {selectedEntry ? <Badge status={selectedEntry.status} /> : "Nessuna prenotazione"}
               </p>
+              <button
+                type="button"
+                disabled={alreadyBooked}
+                onClick={() => onBook(selected)}
+                className="h-12 w-full rounded-md border-2 border-black bg-white text-base font-bold text-black hover:bg-yellow-100 disabled:cursor-not-allowed disabled:bg-zinc-300"
+              >
+                Prenota per oggi
+              </button>
               <button
                 type="button"
                 disabled={alreadyRegistered}
