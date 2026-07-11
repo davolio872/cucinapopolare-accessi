@@ -12,20 +12,20 @@ export function LoginForm() {
   return (
     <form action={formAction} className="mt-8 space-y-4">
       <label className="block">
-        <span className="text-sm font-bold text-stone-700">Email o nome utente</span>
+        <span className="text-sm font-bold text-black">Email o nome utente</span>
         <input
           name="email"
           type="text"
           autoComplete="username"
           required
-          className="mt-1 h-12 w-full rounded-md border border-stone-300 px-3 text-base"
+          className="mt-1 h-12 w-full rounded-md border-2 border-black px-3 text-base"
           placeholder="admin"
         />
       </label>
 
       <label className="block">
-        <span className="text-sm font-bold text-stone-700">Password</span>
-        <div className="mt-1 flex rounded-md border border-stone-300 bg-white">
+        <span className="text-sm font-bold text-black">Password</span>
+        <div className="mt-1 flex rounded-md border-2 border-black bg-white">
           <input
             name="password"
             type={showPassword ? "text" : "password"}
@@ -37,7 +37,7 @@ export function LoginForm() {
           <button
             type="button"
             onClick={() => setShowPassword((value) => !value)}
-            className="px-3 text-sm font-bold text-emerald-800"
+            className="px-3 text-sm font-bold text-black hover:bg-yellow-100"
           >
             {showPassword ? "Nascondi" : "Mostra"}
           </button>
@@ -45,7 +45,7 @@ export function LoginForm() {
       </label>
 
       {state.error ? (
-        <p className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-800">
+        <p className="rounded-md border-2 border-black bg-yellow-100 p-3 text-sm font-semibold text-black">
           {state.error}
         </p>
       ) : null}
@@ -53,7 +53,7 @@ export function LoginForm() {
       <button
         type="submit"
         disabled={pending}
-        className="h-12 w-full rounded-md bg-emerald-800 px-4 text-base font-bold text-white disabled:cursor-wait disabled:bg-stone-400"
+        className="h-12 w-full rounded-md border-2 border-black bg-yellow-400 px-4 text-base font-bold text-black hover:bg-yellow-300 disabled:cursor-wait disabled:bg-zinc-300"
       >
         {pending ? "Accesso in corso..." : "Accedi"}
       </button>

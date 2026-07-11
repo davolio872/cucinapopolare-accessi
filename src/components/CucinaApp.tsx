@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import { createDemoState } from "@/data/demo-data";
 import { currentTime, formatItalianDate, todayKey } from "@/lib/dates";
 import { applyImport, downloadTemplate, parseImportFile } from "@/lib/excel";
@@ -42,10 +43,10 @@ function sortUsers(users: User[]) {
 }
 
 function statusClass(status: AttendanceStatus) {
-  if (status === "Presente") return "bg-emerald-100 text-emerald-800";
-  if (status === "Assente") return "bg-rose-100 text-rose-800";
-  if (status === "Senza prenotazione") return "bg-amber-100 text-amber-900";
-  return "bg-sky-100 text-sky-800";
+  if (status === "Presente") return "bg-yellow-300 text-black";
+  if (status === "Assente") return "border border-black bg-white text-black";
+  if (status === "Senza prenotazione") return "bg-yellow-100 text-black";
+  return "bg-black text-white";
 }
 
 function matchesUser(user: User, query: string) {
@@ -184,9 +185,9 @@ export function CucinaApp({ volunteer }: { volunteer: AuthenticatedVolunteer }) 
   };
 
   return (
-    <div className="min-h-screen bg-[#f8f4ed] text-stone-950">
+    <div className="min-h-screen bg-white text-black">
       <div className="flex min-h-screen">
-        <aside className="hidden w-72 shrink-0 border-r border-stone-200 bg-white/85 p-5 shadow-sm md:block">
+        <aside className="hidden w-72 shrink-0 border-r-2 border-black bg-white p-5 md:block">
           <Brand />
           <nav className="mt-8 space-y-2">
             {sections.map((section) => (
@@ -201,19 +202,19 @@ export function CucinaApp({ volunteer }: { volunteer: AuthenticatedVolunteer }) 
         </aside>
 
         <main className="min-w-0 flex-1">
-          <header className="sticky top-0 z-20 border-b border-stone-200 bg-[#f8f4ed]/95 px-4 py-3 backdrop-blur md:px-8">
+          <header className="sticky top-0 z-20 border-b-2 border-black bg-white/95 px-4 py-3 backdrop-blur md:px-8">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="md:hidden">
                 <Brand compact />
               </div>
               <div className="hidden md:block">
-                <p className="text-sm font-medium capitalize text-stone-600">{formatItalianDate()}</p>
+                <p className="text-sm font-medium capitalize text-zinc-700">{formatItalianDate()}</p>
               </div>
               <UserMenu volunteer={volunteer} />
               <select
                 value={activeSection}
                 onChange={(event) => setActiveSection(event.target.value as SectionId)}
-                className="h-12 rounded-md border border-stone-300 bg-white px-3 text-base font-semibold md:hidden"
+                className="h-12 rounded-md border-2 border-black bg-white px-3 text-base font-semibold md:hidden"
                 aria-label="Menu sezioni"
               >
                 {sections.map((section) => (
@@ -226,7 +227,7 @@ export function CucinaApp({ volunteer }: { volunteer: AuthenticatedVolunteer }) 
           </header>
 
           {notice ? (
-            <div className="mx-4 mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-900 md:mx-8">
+            <div className="mx-4 mt-4 rounded-md border-2 border-black bg-yellow-100 px-4 py-3 text-black md:mx-8">
               {notice}
             </div>
           ) : null}
@@ -273,15 +274,15 @@ function UserMenu({ volunteer }: { volunteer: AuthenticatedVolunteer }) {
     .join(" ");
 
   return (
-    <div className="flex items-center gap-3 rounded-md border border-stone-200 bg-white px-3 py-2">
+    <div className="flex items-center gap-3 rounded-md border-2 border-black bg-white px-3 py-2">
       <div className="hidden text-right sm:block">
         {fullName ? <p className="text-sm font-bold">{fullName}</p> : null}
-        <p className="text-xs text-stone-600">{volunteer.email}</p>
+        <p className="text-xs text-zinc-700">{volunteer.email}</p>
       </div>
       <form action="/auth/signout" method="post">
         <button
           type="submit"
-          className="h-10 rounded-md bg-stone-800 px-3 text-sm font-bold text-white"
+          className="h-10 rounded-md border-2 border-black bg-yellow-400 px-3 text-sm font-bold text-black hover:bg-yellow-300"
         >
           Esci
         </button>
@@ -293,12 +294,16 @@ function UserMenu({ volunteer }: { volunteer: AuthenticatedVolunteer }) {
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <div className="flex items-center gap-3">
-      <div className="grid h-12 w-12 place-items-center rounded-md bg-emerald-800 text-xl font-bold text-white">
-        CP
-      </div>
+      <Image
+        src="/logo-cucina-popolare.png"
+        alt="Cucina Popolare Genovese"
+        width={64}
+        height={84}
+        className={compact ? "h-12 w-10 object-contain" : "h-16 w-12 object-contain"}
+      />
       <div>
         <p className={compact ? "text-lg font-bold" : "text-2xl font-bold"}>Cucina Popolare Genovese</p>
-        {!compact ? <p className="text-sm text-stone-600">Demo gestione ingressi</p> : null}
+        {!compact ? <p className="text-sm text-zinc-700">Demo gestione ingressi</p> : null}
       </div>
     </div>
   );
@@ -318,10 +323,10 @@ function NavButton({
       type="button"
       onClick={onClick}
       className={`flex h-14 w-full items-center gap-3 rounded-md px-4 text-left text-base font-semibold transition ${
-        active ? "bg-emerald-800 text-white" : "text-stone-700 hover:bg-stone-100"
+        active ? "border-2 border-black bg-yellow-400 text-black" : "text-black hover:bg-yellow-100"
       }`}
     >
-      <span className="grid h-8 w-8 place-items-center rounded-md bg-white/20 text-lg">{section.icon}</span>
+      <span className="grid h-8 w-8 place-items-center rounded-md border border-black bg-white text-lg">{section.icon}</span>
       {section.label}
     </button>
   );
@@ -331,7 +336,7 @@ function SectionHeader({ title, description }: { title: string; description: str
   return (
     <div className="mb-5">
       <h1 className="text-2xl font-bold tracking-normal md:text-3xl">{title}</h1>
-      <p className="mt-1 max-w-3xl text-base text-stone-600">{description}</p>
+      <p className="mt-1 max-w-3xl text-base text-zinc-700">{description}</p>
     </div>
   );
 }
@@ -358,8 +363,8 @@ function Dashboard({
       />
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {cards.map(([label, value]) => (
-          <div key={label} className="rounded-md border border-stone-200 bg-white p-4 shadow-sm">
-            <p className="text-sm font-semibold text-stone-600">{label}</p>
+          <div key={label} className="rounded-md border-2 border-black bg-white p-4">
+            <p className="text-sm font-semibold text-zinc-700">{label}</p>
             <p className="mt-2 text-4xl font-bold">{value}</p>
           </div>
         ))}
@@ -370,7 +375,7 @@ function Dashboard({
             key={section.id}
             type="button"
             onClick={() => setActiveSection(section.id)}
-            className="min-h-24 rounded-md bg-emerald-800 px-5 py-4 text-left text-xl font-bold text-white shadow-sm transition hover:bg-emerald-900"
+            className="min-h-24 rounded-md border-2 border-black bg-yellow-400 px-5 py-4 text-left text-xl font-bold text-black transition hover:bg-yellow-300"
           >
             <span className="mb-2 block text-2xl">{section.icon}</span>
             {section.label === "Importa Excel" ? "Importa da Excel" : section.label}
@@ -414,7 +419,7 @@ function Bookings({
             type="button"
             onClick={() => onRegister(user.id)}
             disabled={entry.status === "Presente" || entry.status === "Senza prenotazione"}
-            className="h-11 rounded-md bg-emerald-800 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:bg-stone-300"
+            className="h-11 rounded-md border-2 border-black bg-yellow-400 px-4 font-semibold text-black hover:bg-yellow-300 disabled:cursor-not-allowed disabled:bg-zinc-300"
           >
             Registra presenza
           </button>,
@@ -451,15 +456,15 @@ function NewEntry({
         description="Cerca per nome, cognome, numero tessera o telefono, poi registra l'ingresso."
       />
       <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
-        <div className="rounded-md border border-stone-200 bg-white p-4">
-          <label className="text-sm font-bold text-stone-700" htmlFor="entry-search">
+        <div className="rounded-md border-2 border-black bg-white p-4">
+          <label className="text-sm font-bold text-black" htmlFor="entry-search">
             Cerca persona
           </label>
           <input
             id="entry-search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="mt-2 h-12 w-full rounded-md border border-stone-300 px-3 text-base"
+            className="mt-2 h-12 w-full rounded-md border-2 border-black px-3 text-base"
             placeholder="Nome, cognome, tessera o telefono"
           />
           <div className="mt-4 grid gap-2">
@@ -469,18 +474,18 @@ function NewEntry({
                 type="button"
                 onClick={() => setSelectedId(user.id)}
                 className={`rounded-md border p-3 text-left ${
-                  selectedId === user.id ? "border-emerald-700 bg-emerald-50" : "border-stone-200"
+                  selectedId === user.id ? "border-black bg-yellow-100" : "border-black bg-white"
                 }`}
               >
                 <span className="block font-bold">
                   {user.cardNumber} · {user.firstName} {user.lastName}
                 </span>
-                <span className="text-sm text-stone-600">{user.phone || "Telefono non indicato"}</span>
+                <span className="text-sm text-zinc-700">{user.phone || "Telefono non indicato"}</span>
               </button>
             ))}
           </div>
         </div>
-        <div className="rounded-md border border-stone-200 bg-white p-4">
+        <div className="rounded-md border-2 border-black bg-white p-4">
           <h2 className="text-xl font-bold">Persona selezionata</h2>
           {selected ? (
             <div className="mt-4 space-y-3">
@@ -497,13 +502,13 @@ function NewEntry({
                 type="button"
                 disabled={alreadyRegistered}
                 onClick={() => onRegister(selected)}
-                className="h-14 w-full rounded-md bg-emerald-800 text-lg font-bold text-white disabled:cursor-not-allowed disabled:bg-stone-300"
+                className="h-14 w-full rounded-md border-2 border-black bg-yellow-400 text-lg font-bold text-black hover:bg-yellow-300 disabled:cursor-not-allowed disabled:bg-zinc-300"
               >
                 Registra ingresso
               </button>
             </div>
           ) : (
-            <p className="mt-4 text-stone-600">Seleziona una persona dai risultati.</p>
+            <p className="mt-4 text-zinc-700">Seleziona una persona dai risultati.</p>
           )}
         </div>
       </div>
@@ -547,13 +552,13 @@ function UsersRegistry({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="h-12 rounded-md border border-stone-300 bg-white px-3"
+            className="h-12 rounded-md border-2 border-black bg-white px-3"
             placeholder="Cerca utenti"
           />
           <select
             value={filter}
             onChange={(event) => setFilter(event.target.value as typeof filter)}
-            className="h-12 rounded-md border border-stone-300 bg-white px-3"
+            className="h-12 rounded-md border-2 border-black bg-white px-3"
           >
             <option value="active">Utenti attivi</option>
             <option value="inactive">Utenti non attivi</option>
@@ -563,7 +568,7 @@ function UsersRegistry({
         <button
           type="button"
           onClick={() => setCreating(true)}
-          className="h-12 rounded-md bg-emerald-800 px-5 font-bold text-white"
+          className="h-12 rounded-md border-2 border-black bg-yellow-400 px-5 font-bold text-black hover:bg-yellow-300"
         >
           Nuovo utente
         </button>
@@ -578,13 +583,13 @@ function UsersRegistry({
           user.active ? "Attivo" : "Non attivo",
           user.notes || "-",
           <div key="actions" className="flex flex-wrap gap-2">
-            <button className="h-10 rounded-md bg-stone-800 px-3 font-semibold text-white" onClick={() => setEditing(user)}>
+            <button className="h-10 rounded-md border-2 border-black bg-black px-3 font-semibold text-white" onClick={() => setEditing(user)}>
               Modifica
             </button>
-            <button className="h-10 rounded-md bg-amber-600 px-3 font-semibold text-white" onClick={() => onToggleActive(user.id)}>
+            <button className="h-10 rounded-md border-2 border-black bg-yellow-400 px-3 font-semibold text-black hover:bg-yellow-300" onClick={() => onToggleActive(user.id)}>
               {user.active ? "Disattiva" : "Attiva"}
             </button>
-            <button className="h-10 rounded-md bg-rose-700 px-3 font-semibold text-white" onClick={() => onDelete(user.id)}>
+            <button className="h-10 rounded-md border-2 border-black bg-white px-3 font-semibold text-black hover:bg-yellow-100" onClick={() => onDelete(user.id)}>
               Elimina
             </button>
           </div>,
@@ -633,10 +638,10 @@ function UserForm({
 
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/40 p-4">
-      <form onSubmit={submit} className="w-full max-w-2xl rounded-md bg-white p-5 shadow-xl">
+      <form onSubmit={submit} className="w-full max-w-2xl rounded-md border-2 border-black bg-white p-5 shadow-xl">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="text-xl font-bold">{initial ? "Modifica utente" : "Nuovo utente"}</h2>
-          <button type="button" onClick={onClose} className="h-10 rounded-md border px-3 font-semibold">
+          <button type="button" onClick={onClose} className="h-10 rounded-md border-2 border-black px-3 font-semibold hover:bg-yellow-100">
             Chiudi
           </button>
         </div>
@@ -645,7 +650,7 @@ function UserForm({
           <Field label="Telefono" value={form.phone} onChange={(value) => update("phone", value)} />
           <Field label="Nome" value={form.firstName} onChange={(value) => update("firstName", value)} required />
           <Field label="Cognome" value={form.lastName} onChange={(value) => update("lastName", value)} required />
-          <label className="flex items-center gap-3 rounded-md border border-stone-200 p-3 font-semibold">
+          <label className="flex items-center gap-3 rounded-md border-2 border-black p-3 font-semibold">
             <input
               type="checkbox"
               checked={form.active}
@@ -659,11 +664,11 @@ function UserForm({
             <textarea
               value={form.notes}
               onChange={(event) => update("notes", event.target.value)}
-              className="mt-1 min-h-24 w-full rounded-md border border-stone-300 p-3"
+              className="mt-1 min-h-24 w-full rounded-md border-2 border-black p-3"
             />
           </label>
         </div>
-        <button type="submit" className="mt-5 h-12 rounded-md bg-emerald-800 px-5 font-bold text-white">
+        <button type="submit" className="mt-5 h-12 rounded-md border-2 border-black bg-yellow-400 px-5 font-bold text-black hover:bg-yellow-300">
           Salva utente
         </button>
       </form>
@@ -689,7 +694,7 @@ function Field({
         required={required}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 h-11 w-full rounded-md border border-stone-300 px-3"
+        className="mt-1 h-11 w-full rounded-md border-2 border-black px-3"
       />
     </label>
   );
@@ -749,16 +754,16 @@ function ImportPage({
             onDragLeave={() => setDragging(false)}
             onDrop={onDrop}
             className={`grid min-h-48 place-items-center rounded-md border-2 border-dashed bg-white p-6 text-center ${
-              dragging ? "border-emerald-700" : "border-stone-300"
+              dragging ? "border-black bg-yellow-100" : "border-black"
             }`}
           >
             <div>
               <p className="text-xl font-bold">Trascina qui il file</p>
-              <p className="mt-1 text-stone-600">oppure selezionalo dal computer</p>
+              <p className="mt-1 text-zinc-700">oppure selezionalo dal computer</p>
               <button
                 type="button"
                 onClick={() => fileInput.current?.click()}
-                className="mt-4 h-12 rounded-md bg-emerald-800 px-5 font-bold text-white"
+                className="mt-4 h-12 rounded-md border-2 border-black bg-yellow-400 px-5 font-bold text-black hover:bg-yellow-300"
               >
                 Seleziona file
               </button>
@@ -771,7 +776,7 @@ function ImportPage({
               />
             </div>
           </div>
-          {error ? <p className="mt-3 rounded-md bg-rose-50 p-3 font-semibold text-rose-800">{error}</p> : null}
+          {error ? <p className="mt-3 rounded-md border-2 border-black bg-yellow-100 p-3 font-semibold text-black">{error}</p> : null}
           {preview ? (
             <ImportPreviewBlock
               preview={preview}
@@ -785,18 +790,18 @@ function ImportPage({
             />
           ) : null}
         </div>
-        <div className="rounded-md border border-stone-200 bg-white p-4">
+        <div className="rounded-md border-2 border-black bg-white p-4">
           <h2 className="text-xl font-bold">Modello Excel</h2>
-          <p className="mt-2 text-stone-600">Scarica un file già pronto con colonne corrette e due righe di esempio.</p>
+          <p className="mt-2 text-zinc-700">Scarica un file già pronto con colonne corrette e due righe di esempio.</p>
           <button
             type="button"
             onClick={downloadTemplate}
-            className="mt-4 h-12 w-full rounded-md bg-stone-800 px-4 font-bold text-white"
+            className="mt-4 h-12 w-full rounded-md border-2 border-black bg-black px-4 font-bold text-white"
           >
             Scarica modello Excel
           </button>
           {summary ? (
-            <div className="mt-5 rounded-md bg-emerald-50 p-4 text-emerald-950">
+            <div className="mt-5 rounded-md border-2 border-black bg-yellow-100 p-4 text-black">
               <h3 className="font-bold">Riepilogo importazione</h3>
               <ul className="mt-2 space-y-1 text-sm">
                 <li>Utenti importati: {summary.imported}</li>
@@ -828,7 +833,7 @@ function ImportPreviewBlock({
 }) {
   const keys = Object.keys(preview.firstRows[0] ?? {});
   return (
-    <div className="mt-5 rounded-md border border-stone-200 bg-white p-4">
+    <div className="mt-5 rounded-md border-2 border-black bg-white p-4">
       <h2 className="text-xl font-bold">Anteprima importazione</h2>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="File" value={preview.fileName} small />
@@ -837,10 +842,10 @@ function ImportPreviewBlock({
         <Metric label="Righe con errori" value={preview.errorRows} />
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <p className="rounded-md bg-amber-50 p-3 text-amber-950">
+        <p className="rounded-md border-2 border-black bg-yellow-100 p-3 text-black">
           Numeri tessera duplicati nel file: {preview.duplicateCardNumbers.length || 0}
         </p>
-        <p className="rounded-md bg-sky-50 p-3 text-sky-950">
+        <p className="rounded-md border-2 border-black bg-white p-3 text-black">
           Utenti già presenti: {preview.existingCardNumbers.length || 0}
         </p>
       </div>
@@ -850,7 +855,7 @@ function ImportPreviewBlock({
           <select
             value={strategy}
             onChange={(event) => setStrategy(event.target.value as DuplicateStrategy)}
-            className="mt-1 h-12 w-full max-w-sm rounded-md border border-stone-300 px-3"
+            className="mt-1 h-12 w-full max-w-sm rounded-md border-2 border-black px-3"
           >
             <option value="ignore">Ignora</option>
             <option value="update">Aggiorna utente esistente</option>
@@ -858,12 +863,12 @@ function ImportPreviewBlock({
           </select>
         </div>
       ) : null}
-      <div className="mt-4 overflow-x-auto rounded-md border border-stone-200">
-        <table className="min-w-full divide-y divide-stone-200 text-sm">
-          <thead className="bg-stone-100">
+      <div className="mt-4 overflow-x-auto rounded-md border-2 border-black">
+        <table className="min-w-full divide-y divide-zinc-200 text-sm">
+          <thead className="bg-yellow-100">
             <tr>{keys.map((key) => <th key={key} className="px-3 py-2 text-left font-bold">{key}</th>)}</tr>
           </thead>
-          <tbody className="divide-y divide-stone-100">
+          <tbody className="divide-y divide-zinc-200">
             {preview.firstRows.map((row, index) => (
               <tr key={`${index}-${JSON.stringify(row)}`}>
                 {keys.map((key) => <td key={key} className="px-3 py-2">{row[key] || "-"}</td>)}
@@ -873,10 +878,10 @@ function ImportPreviewBlock({
         </table>
       </div>
       <div className="mt-4 flex flex-wrap gap-3">
-        <button type="button" onClick={onConfirm} className="h-12 rounded-md bg-emerald-800 px-5 font-bold text-white">
+        <button type="button" onClick={onConfirm} className="h-12 rounded-md border-2 border-black bg-yellow-400 px-5 font-bold text-black hover:bg-yellow-300">
           Conferma importazione
         </button>
-        <button type="button" onClick={onCancel} className="h-12 rounded-md border border-stone-300 px-5 font-bold">
+        <button type="button" onClick={onCancel} className="h-12 rounded-md border-2 border-black px-5 font-bold hover:bg-yellow-100">
           Annulla
         </button>
       </div>
@@ -886,8 +891,8 @@ function ImportPreviewBlock({
 
 function Metric({ label, value, small = false }: { label: string; value: string | number; small?: boolean }) {
   return (
-    <div className="rounded-md bg-stone-100 p-3">
-      <p className="text-xs font-bold uppercase text-stone-500">{label}</p>
+    <div className="rounded-md border-2 border-black bg-white p-3">
+      <p className="text-xs font-bold uppercase text-zinc-700">{label}</p>
       <p className={small ? "mt-1 break-all text-sm font-bold" : "mt-1 text-2xl font-bold"}>{value}</p>
     </div>
   );
@@ -905,10 +910,10 @@ function ResponsiveTable({
   rows: (string | number | React.ReactNode)[][];
 }) {
   return (
-    <div className="overflow-hidden rounded-md border border-stone-200 bg-white shadow-sm">
+    <div className="overflow-hidden rounded-md border-2 border-black bg-white">
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-stone-200 text-left text-sm">
-          <thead className="bg-stone-100 text-stone-700">
+        <table className="min-w-full divide-y divide-zinc-200 text-left text-sm">
+          <thead className="bg-yellow-100 text-black">
             <tr>
               {headers.map((header) => (
                 <th key={header} className="px-4 py-3 font-bold">
@@ -917,7 +922,7 @@ function ResponsiveTable({
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-stone-100">
+          <tbody className="divide-y divide-zinc-200">
             {rows.map((row, index) => (
               <tr key={index} className="align-top">
                 {row.map((cell, cellIndex) => (
@@ -930,7 +935,7 @@ function ResponsiveTable({
           </tbody>
         </table>
       </div>
-      {rows.length === 0 ? <p className="p-5 text-stone-600">Nessun risultato disponibile.</p> : null}
+      {rows.length === 0 ? <p className="p-5 text-zinc-700">Nessun risultato disponibile.</p> : null}
     </div>
   );
 }

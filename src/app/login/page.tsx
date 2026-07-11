@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { redirect } from "next/navigation";
 import { getAuthenticatedUser } from "@/lib/supabase/server";
 import { LoginForm } from "./LoginForm";
@@ -18,20 +19,24 @@ export default async function LoginPage({
         : "";
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[#f8f4ed] px-4 py-10 text-stone-950">
-      <section className="w-full max-w-md rounded-md border border-stone-200 bg-white p-6 shadow-sm">
+    <main className="grid min-h-screen place-items-center bg-white px-4 py-10 text-black">
+      <section className="w-full max-w-md rounded-md border-2 border-black bg-white p-6">
         <div className="flex items-center gap-3">
-          <div className="grid h-12 w-12 place-items-center rounded-md bg-emerald-800 text-xl font-bold text-white">
-            CP
-          </div>
+          <Image
+            src="/logo-cucina-popolare.png"
+            alt="Cucina Popolare Genovese"
+            width={64}
+            height={84}
+            className="h-16 w-12 object-contain"
+          />
           <div>
             <h1 className="text-2xl font-bold">Cucina Popolare Genovese</h1>
-            <p className="text-sm text-stone-600">Accesso volontari</p>
+            <p className="text-sm text-zinc-700">Accesso volontari</p>
           </div>
         </div>
 
         {pageMessage ? (
-          <p className="mt-6 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">
+          <p className="mt-6 rounded-md border-2 border-black bg-yellow-100 p-3 text-sm font-semibold text-black">
             {pageMessage}
           </p>
         ) : null}
