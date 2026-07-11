@@ -52,12 +52,37 @@ Nella pagina "Importa da Excel" è disponibile il pulsante "Scarica modello Exce
 4. Lascia le impostazioni predefinite per Next.js.
 5. Avvia il deploy.
 
-Non servono variabili ambiente per questa demo.
+Non servono variabili ambiente obbligatorie: la chiave pubblicabile Supabase è già configurata per questa demo.
+
+## Collegamento Supabase
+
+Il progetto è collegato al Supabase `upsqhkvlpxowsdoihpth`.
+
+Nell'app compare il riquadro "Archivio dati":
+
+- senza PIN usa i dati locali del browser;
+- con il PIN Supabase carica e salva i dati condivisi nel database.
+
+PIN iniziale per i test:
+
+```text
+cucina2026
+```
+
+Lo schema applicato è in `supabase/schema.sql`. Le tabelle hanno RLS attivo e non sono accessibili direttamente con la chiave pubblicabile; l'app passa dalle funzioni RPC `cpg_get_state` e `cpg_save_state`, protette dal PIN.
+
+Per cambiare PIN in Supabase:
+
+```sql
+update public.cpg_app_config
+set value = extensions.crypt('nuovo-pin', extensions.gen_salt('bf')),
+    updated_at = now()
+where key = 'access_pin_hash';
+```
 
 ## Limiti della versione demo
 
-- Non usa Supabase o database remoto.
 - Non ha autenticazione reale.
-- I dati sono fittizi e vengono salvati solo nel `localStorage` del browser.
-- Ogni browser/dispositivo ha una propria copia dei dati.
+- La modalità locale usa dati fittizi nel `localStorage`.
+- La modalità Supabase permette test condivisi con dati reali, ma il PIN non sostituisce un sistema di autenticazione completo.
 - Non include QR code, notifiche, SMS, WhatsApp, PDF, ruoli o permessi avanzati.
