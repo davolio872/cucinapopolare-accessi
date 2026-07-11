@@ -58,10 +58,16 @@ Non servono variabili ambiente obbligatorie: la chiave pubblicabile Supabase è 
 
 Il progetto è collegato al Supabase `upsqhkvlpxowsdoihpth`.
 
-Nell'app compare il riquadro "Archivio dati":
+Variabili consigliate per locale e Vercel:
 
-- senza PIN usa i dati locali del browser;
-- con il PIN Supabase carica e salva i dati condivisi nel database.
+```bash
+NEXT_PUBLIC_SUPABASE_URL=https://upsqhkvlpxowsdoihpth.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_R0dXZVu6DAbY2z2u8p7U4g_IIPcszVI
+```
+
+Sono chiavi pubblicabili: non usare mai `service_role` o chiavi secret nel browser.
+
+La demo mantiene ancora i dati operativi nel browser con `localStorage`. Il collegamento Supabase resta disponibile a livello di progetto e schema, ma l'accesso principale al gestionale passa dal login iniziale.
 
 PIN iniziale per i test:
 
@@ -69,7 +75,7 @@ PIN iniziale per i test:
 cucina2026
 ```
 
-Lo schema applicato è in `supabase/schema.sql`. Le tabelle hanno RLS attivo e non sono accessibili direttamente con la chiave pubblicabile; l'app passa dalle funzioni RPC `cpg_get_state` e `cpg_save_state`, protette dal PIN.
+Lo schema applicato è in `supabase/schema.sql`. Le tabelle hanno RLS attivo e non sono accessibili direttamente con la chiave pubblicabile; le funzioni RPC `cpg_get_state` e `cpg_save_state` restano disponibili per test dati protetti da PIN.
 
 Per cambiare PIN in Supabase:
 
@@ -79,6 +85,105 @@ set value = extensions.crypt('nuovo-pin', extensions.gen_salt('bf')),
     updated_at = now()
 where key = 'access_pin_hash';
 ```
+
+## Autenticazione volontari
+
+L'app protegge tutte le pagine operative con Supabase Auth email/password e cookie SSR tramite `@supabase/ssr`.
+
+Pagine protette:
+
+- `/`
+- `/test-supabase`
+- tutte le sezioni operative interne: dashboard, prenotazioni, nuovo ingresso, anagrafica e import Excel
+
+Pagina pubblica:
+
+- `/login`
+
+### 1. Attivare email/password
+
+Nel pannello Supabase:
+
+1. Vai in Authentication.
+2. Apri Providers.
+3. Abilita Email.
+4. Abilita Email + Password.
+
+### 2. Disabilitare temporaneamente la registrazione pubblica
+
+Nel pannello Supabase:
+
+1. Vai in Authentication.
+2. Apri Providers oppure Settings, in base alla vista Supabase.
+3. Disabilita le registrazioni pubbliche se l'opzione è disponibile nel progetto.
+
+In questa app non esiste una pagina di registrazione: i volontari vengono creati manualmente.
+
+### 3. Creare manualmente un volontario
+
+Nel pannello Supabase:
+
+1. Vai in Authentication > Users.
+2. Crea un nuovo utente.
+3. Inserisci email e password temporanea.
+4. Conferma l'email se il progetto richiede conferma prima del login.
+
+### 4. Inserire il profilo
+
+Dopo aver creato l'utente, copia il suo `id` e inserisci il profilo:
+
+```sql
+insert into public.profiles (id, nome, cognome, ruolo, attivo)
+values (
+  'UUID_UTENTE_AUTH',
+  'Nome',
+  'Cognome',
+  'operatore',
+  true
+);
+```
+
+Ruoli ammessi:
+
+- `admin`
+- `operatore`
+
+Per disattivare un volontario:
+
+```sql
+update public.profiles
+set attivo = false
+where id = 'UUID_UTENTE_AUTH';
+```
+
+### 5. Testare login e logout
+
+Credenziali demo consigliate:
+
+```text
+nome utente: admin
+password demo: 1234
+```
+
+Questo accesso demo usa un cookie httpOnly lato server e serve solo per provare il gestionale. Per test con volontari reali, crea utenti Supabase Auth con email/password robuste.
+
+1. Apri `/login`.
+2. Inserisci email e password del volontario.
+3. Dopo l'accesso viene mostrata la dashboard.
+4. Nell'intestazione compaiono nome, email e pulsante "Esci".
+5. Premi "Esci": l'app torna a `/login`.
+
+### 6. Verificare protezione pagine
+
+Da browser anonimo o dopo logout:
+
+- aprendo `/` si viene reindirizzati a `/login`;
+- aprendo `/test-supabase` si viene reindirizzati a `/login`;
+- visitando `/login` mentre si è già autenticati si torna alla dashboard.
+
+### 7. Aggiungere altri operatori
+
+Ripeti la creazione manuale dell'utente in Authentication > Users e inserisci un record corrispondente in `profiles`.
 
 ## Limiti della versione demo
 

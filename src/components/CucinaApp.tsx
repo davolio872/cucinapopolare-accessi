@@ -4,7 +4,7 @@ import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState
 import { createDemoState } from "@/data/demo-data";
 import { currentTime, formatItalianDate, todayKey } from "@/lib/dates";
 import { applyImport, downloadTemplate, parseImportFile } from "@/lib/excel";
-import { isSupabaseConfigured, loadRemoteState, saveRemoteState } from "@/lib/supabase";
+import type { AuthenticatedVolunteer } from "@/lib/supabase/server";
 import type {
   AppState,
   AttendanceStatus,
@@ -18,7 +18,6 @@ import type {
 type SectionId = "dashboard" | "prenotazioni" | "ingresso" | "utenti" | "importa";
 
 const storageKey = "cucina-popolare-demo-state-v1";
-const supabasePinKey = "cucina-popolare-supabase-pin-v1";
 const today = todayKey();
 
 const sections: { id: SectionId; label: string; icon: string }[] = [
@@ -58,15 +57,11 @@ function matchesUser(user: User, query: string) {
     .includes(needle);
 }
 
-export function CucinaApp() {
+export function CucinaApp({ volunteer }: { volunteer: AuthenticatedVolunteer }) {
   const [activeSection, setActiveSection] = useState<SectionId>("dashboard");
   const [state, setState] = useState<AppState>(() => createDemoState(today));
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState("");
-  const [dataMode, setDataMode] = useState<"locale" | "supabase">("locale");
-  const [supabasePin, setSupabasePin] = useState("");
-  const [supabaseDraftPin, setSupabaseDraftPin] = useState("");
-  const [syncStatus, setSyncStatus] = useState("Dati locali del browser");
   const todayEntries = useMemo(
     () => state.entries.filter((entry) => entry.date === today),
     [state.entries],
@@ -74,25 +69,6 @@ export function CucinaApp() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const savedPin = window.sessionStorage.getItem(supabasePinKey);
-      if (savedPin && isSupabaseConfigured) {
-        setSupabaseDraftPin(savedPin);
-        setSyncStatus("Connessione a Supabase...");
-        void loadRemoteState(savedPin)
-          .then((remoteState) => {
-            setState(remoteState);
-            setSupabasePin(savedPin);
-            setDataMode("supabase");
-            setLoaded(true);
-            setSyncStatus("Connesso a Supabase");
-          })
-          .catch(() => {
-            setSyncStatus("Errore connessione Supabase");
-            setLoaded(true);
-          });
-        return;
-      }
-
       const saved = window.localStorage.getItem(storageKey);
       if (saved) {
         try {
@@ -108,64 +84,19 @@ export function CucinaApp() {
   }, []);
 
   useEffect(() => {
-    if (loaded && dataMode === "locale") {
+    if (loaded) {
       window.localStorage.setItem(storageKey, JSON.stringify(state));
     }
-  }, [dataMode, loaded, state]);
+  }, [loaded, state]);
 
   function showNotice(message: string) {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 4500);
   }
 
-  async function connectSupabase(pin = supabaseDraftPin, showSuccess = true) {
-    if (!isSupabaseConfigured) {
-      showNotice("Supabase non è configurato.");
-      return;
-    }
-    if (!pin.trim()) {
-      showNotice("Inserisci il PIN Supabase.");
-      return;
-    }
-
-    setSyncStatus("Connessione a Supabase...");
-    try {
-      const remoteState = await loadRemoteState(pin.trim());
-      setState(remoteState);
-      setSupabasePin(pin.trim());
-      setDataMode("supabase");
-      setLoaded(true);
-      window.sessionStorage.setItem(supabasePinKey, pin.trim());
-      setSyncStatus("Connesso a Supabase");
-      if (showSuccess) showNotice("Dati caricati da Supabase.");
-    } catch {
-      setSyncStatus("Errore connessione Supabase");
-      showNotice("PIN non valido o Supabase non raggiungibile.");
-      setLoaded(true);
-    }
-  }
-
-  function disconnectSupabase() {
-    window.sessionStorage.removeItem(supabasePinKey);
-    setSupabasePin("");
-    setSupabaseDraftPin("");
-    setDataMode("locale");
-    setSyncStatus("Dati locali del browser");
-    showNotice("Modalità locale riattivata.");
-  }
-
   function commitState(updater: (previous: AppState) => AppState) {
     setState((previous) => {
       const next = updater(previous);
-      if (dataMode === "supabase" && supabasePin) {
-        setSyncStatus("Salvataggio su Supabase...");
-        void saveRemoteState(supabasePin, next)
-          .then(() => setSyncStatus("Salvato su Supabase"))
-          .catch(() => {
-            setSyncStatus("Errore salvataggio Supabase");
-            showNotice("Modifica locale salvata, ma sincronizzazione Supabase non riuscita.");
-          });
-      }
       return next;
     });
   }
@@ -278,6 +209,7 @@ export function CucinaApp() {
               <div className="hidden md:block">
                 <p className="text-sm font-medium capitalize text-stone-600">{formatItalianDate()}</p>
               </div>
+              <UserMenu volunteer={volunteer} />
               <select
                 value={activeSection}
                 onChange={(event) => setActiveSection(event.target.value as SectionId)}
@@ -300,16 +232,8 @@ export function CucinaApp() {
           ) : null}
 
           <div className="px-4 py-6 md:px-8">
-            <SupabasePanel
-              dataMode={dataMode}
-              draftPin={supabaseDraftPin}
-              syncStatus={syncStatus}
-              onPinChange={setSupabaseDraftPin}
-              onConnect={() => void connectSupabase()}
-              onDisconnect={disconnectSupabase}
-            />
             {activeSection === "dashboard" ? (
-              <Dashboard stats={stats} setActiveSection={setActiveSection} dataMode={dataMode} />
+              <Dashboard stats={stats} setActiveSection={setActiveSection} />
             ) : null}
             {activeSection === "prenotazioni" ? (
               <Bookings users={state.users} entries={todayEntries} onRegister={registerPresence} />
@@ -339,6 +263,29 @@ export function CucinaApp() {
           </div>
         </main>
       </div>
+    </div>
+  );
+}
+
+function UserMenu({ volunteer }: { volunteer: AuthenticatedVolunteer }) {
+  const fullName = [volunteer.profile?.nome, volunteer.profile?.cognome]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <div className="flex items-center gap-3 rounded-md border border-stone-200 bg-white px-3 py-2">
+      <div className="hidden text-right sm:block">
+        {fullName ? <p className="text-sm font-bold">{fullName}</p> : null}
+        <p className="text-xs text-stone-600">{volunteer.email}</p>
+      </div>
+      <form action="/auth/signout" method="post">
+        <button
+          type="submit"
+          className="h-10 rounded-md bg-stone-800 px-3 text-sm font-bold text-white"
+        >
+          Esci
+        </button>
+      </form>
     </div>
   );
 }
@@ -389,71 +336,12 @@ function SectionHeader({ title, description }: { title: string; description: str
   );
 }
 
-function SupabasePanel({
-  dataMode,
-  draftPin,
-  syncStatus,
-  onPinChange,
-  onConnect,
-  onDisconnect,
-}: {
-  dataMode: "locale" | "supabase";
-  draftPin: string;
-  syncStatus: string;
-  onPinChange: (pin: string) => void;
-  onConnect: () => void;
-  onDisconnect: () => void;
-}) {
-  return (
-    <div className="mb-5 rounded-md border border-stone-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-sm font-bold uppercase text-stone-500">Archivio dati</p>
-          <p className="mt-1 text-lg font-bold">
-            {dataMode === "supabase" ? "Supabase attivo" : "Modalità locale"}
-          </p>
-          <p className="text-sm text-stone-600">{syncStatus}</p>
-        </div>
-        {dataMode === "supabase" ? (
-          <button
-            type="button"
-            onClick={onDisconnect}
-            className="h-11 rounded-md border border-stone-300 px-4 font-bold"
-          >
-            Torna ai dati locali
-          </button>
-        ) : (
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              value={draftPin}
-              onChange={(event) => onPinChange(event.target.value)}
-              type="password"
-              className="h-11 rounded-md border border-stone-300 px-3"
-              placeholder="PIN Supabase"
-              aria-label="PIN Supabase"
-            />
-            <button
-              type="button"
-              onClick={onConnect}
-              className="h-11 rounded-md bg-emerald-800 px-4 font-bold text-white"
-            >
-              Usa Supabase
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function Dashboard({
   stats,
   setActiveSection,
-  dataMode,
 }: {
   stats: Record<string, number>;
   setActiveSection: (section: SectionId) => void;
-  dataMode: "locale" | "supabase";
 }) {
   const cards = [
     ["Utenti attivi", stats.activeUsers],
@@ -466,7 +354,7 @@ function Dashboard({
     <section>
       <SectionHeader
         title="Dashboard"
-        description={`Oggi è ${formatItalianDate()}. I dati sono in modalità ${dataMode}.`}
+        description={`Oggi è ${formatItalianDate()}.`}
       />
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {cards.map(([label, value]) => (

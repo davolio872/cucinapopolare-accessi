@@ -1,18 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import type { AppState } from "@/types";
+import { isSupabaseConfigured, supabasePublishableKey, supabaseUrl } from "@/lib/supabase/config";
 
-const fallbackUrl = "https://upsqhkvlpxowsdoihpth.supabase.co";
-const fallbackPublishableKey = "sb_publishable_R0dXZVu6DAbY2z2u8p7U4g_IIPcszVI";
-
-export const supabaseUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || fallbackUrl;
-
-export const supabasePublishableKey =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || fallbackPublishableKey;
-
-export const isSupabaseConfigured = Boolean(
-  supabaseUrl && supabasePublishableKey,
-);
+export { isSupabaseConfigured, supabasePublishableKey, supabaseUrl };
 
 export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
   auth: {
