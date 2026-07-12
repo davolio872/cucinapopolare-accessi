@@ -16,7 +16,6 @@ class MainActivity : Activity() {
     private lateinit var endpointInput: EditText
     private lateinit var secretInput: EditText
     private lateinit var smsReplyCheck: CheckBox
-    private lateinit var callReplyCheck: CheckBox
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,11 +38,6 @@ class MainActivity : Activity() {
             text = "Rispondi automaticamente agli SMS"
             isChecked = GatewayConfig.isSmsReplyEnabled(this@MainActivity)
         }
-        callReplyCheck = CheckBox(this).apply {
-            text = "Prenota e rispondi via SMS alle chiamate"
-            isChecked = GatewayConfig.isCallReplyEnabled(this@MainActivity)
-        }
-
         val saveButton = Button(this).apply {
             text = "Salva"
             setOnClickListener {
@@ -52,7 +46,6 @@ class MainActivity : Activity() {
                     endpointInput.text.toString(),
                     secretInput.text.toString(),
                     smsReplyCheck.isChecked,
-                    callReplyCheck.isChecked,
                 )
                 Toast.makeText(this@MainActivity, "Configurazione salvata.", Toast.LENGTH_SHORT).show()
             }
@@ -64,7 +57,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         }
         val note = TextView(this).apply {
-            text = "Installa l'app sul telefono con SIM dedicata. Gli SMS con PRENOTO e le chiamate dai numeri registrati vengono inviati al gestionale."
+            text = "Installa l'app sul telefono con SIM dedicata. Gli SMS con PRENOTO dai numeri registrati vengono inviati al gestionale."
             textSize = 14f
         }
 
@@ -76,7 +69,6 @@ class MainActivity : Activity() {
             addView(endpointInput)
             addView(secretInput)
             addView(smsReplyCheck)
-            addView(callReplyCheck)
             addView(saveButton)
         }
     }
@@ -85,8 +77,6 @@ class MainActivity : Activity() {
         val permissions = arrayOf(
             Manifest.permission.RECEIVE_SMS,
             Manifest.permission.SEND_SMS,
-            Manifest.permission.READ_PHONE_STATE,
-            Manifest.permission.ANSWER_PHONE_CALLS,
         ).filter {
             checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
         }.toTypedArray()

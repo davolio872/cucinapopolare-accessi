@@ -9,10 +9,10 @@ android {
 
     defaultConfig {
         applicationId = "it.cucinapopolare.gateway"
-        minSdk = 26
+        minSdk = 23
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 3
+        versionName = "0.1.2-sms-test"
     }
 
     compileOptions {
