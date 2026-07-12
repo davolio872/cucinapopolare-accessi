@@ -305,7 +305,44 @@ as $$
   );
 $$;
 
+create or replace function public.cpg_volunteer_role()
+returns text
+language sql
+stable
+set search_path = public, pg_temp
+as $$
+  select p.ruolo
+  from public.profiles p
+  where p.id = (select auth.uid())
+    and p.attivo = true;
+$$;
+
+create or replace function public.cpg_is_admin()
+returns boolean
+language sql
+stable
+set search_path = public, pg_temp
+as $$
+  select coalesce(public.cpg_volunteer_role() = 'admin', false);
+$$;
+
+create or replace function public.cpg_can_write_entry_status(p_status text)
+returns boolean
+language sql
+stable
+set search_path = public, pg_temp
+as $$
+  select public.cpg_is_admin()
+    or (
+      coalesce(public.cpg_volunteer_role() = 'operatore', false)
+      and p_status in ('Presente', 'Senza prenotazione')
+    );
+$$;
+
 grant execute on function public.cpg_is_active_volunteer() to authenticated;
+grant execute on function public.cpg_volunteer_role() to authenticated;
+grant execute on function public.cpg_is_admin() to authenticated;
+grant execute on function public.cpg_can_write_entry_status(text) to authenticated;
 
 grant select, insert, update, delete on public.cpg_users to authenticated;
 grant select, insert, update, delete on public.cpg_daily_entries to authenticated;
@@ -346,22 +383,22 @@ create policy "cpg_users_insert_active_volunteers"
 on public.cpg_users
 for insert
 to authenticated
-with check (public.cpg_is_active_volunteer());
+with check (public.cpg_is_admin());
 
 drop policy if exists "cpg_users_update_active_volunteers" on public.cpg_users;
 create policy "cpg_users_update_active_volunteers"
 on public.cpg_users
 for update
 to authenticated
-using (public.cpg_is_active_volunteer())
-with check (public.cpg_is_active_volunteer());
+using (public.cpg_is_admin())
+with check (public.cpg_is_admin());
 
 drop policy if exists "cpg_users_delete_active_volunteers" on public.cpg_users;
 create policy "cpg_users_delete_active_volunteers"
 on public.cpg_users
 for delete
 to authenticated
-using (public.cpg_is_active_volunteer());
+using (public.cpg_is_admin());
 
 drop policy if exists "cpg_entries_select_active_volunteers" on public.cpg_daily_entries;
 create policy "cpg_entries_select_active_volunteers"
@@ -375,7 +412,7 @@ create policy "cpg_entries_insert_active_volunteers"
 on public.cpg_daily_entries
 for insert
 to authenticated
-with check (public.cpg_is_active_volunteer());
+with check (public.cpg_can_write_entry_status(status));
 
 drop policy if exists "cpg_entries_update_active_volunteers" on public.cpg_daily_entries;
 create policy "cpg_entries_update_active_volunteers"
@@ -383,59 +420,59 @@ on public.cpg_daily_entries
 for update
 to authenticated
 using (public.cpg_is_active_volunteer())
-with check (public.cpg_is_active_volunteer());
+with check (public.cpg_can_write_entry_status(status));
 
 drop policy if exists "cpg_entries_delete_active_volunteers" on public.cpg_daily_entries;
 create policy "cpg_entries_delete_active_volunteers"
 on public.cpg_daily_entries
 for delete
 to authenticated
-using (public.cpg_is_active_volunteer());
+using (public.cpg_is_admin());
 
 drop policy if exists "cpg_contacts_all_active_volunteers" on public.cpg_contacts;
 create policy "cpg_contacts_all_active_volunteers"
 on public.cpg_contacts
 for all
 to authenticated
-using (public.cpg_is_active_volunteer())
-with check (public.cpg_is_active_volunteer());
+using (public.cpg_is_admin())
+with check (public.cpg_is_admin());
 
 drop policy if exists "cpg_logs_select_active_volunteers" on public.cpg_communication_logs;
 create policy "cpg_logs_select_active_volunteers"
 on public.cpg_communication_logs
 for select
 to authenticated
-using (public.cpg_is_active_volunteer());
+using (public.cpg_is_admin());
 
 drop policy if exists "cpg_logs_insert_active_volunteers" on public.cpg_communication_logs;
 create policy "cpg_logs_insert_active_volunteers"
 on public.cpg_communication_logs
 for insert
 to authenticated
-with check (public.cpg_is_active_volunteer());
+with check (public.cpg_is_admin());
 
 drop policy if exists "cpg_settings_select_active_volunteers" on public.cpg_booking_settings;
 create policy "cpg_settings_select_active_volunteers"
 on public.cpg_booking_settings
 for select
 to authenticated
-using (public.cpg_is_active_volunteer());
+using (public.cpg_is_admin());
 
 drop policy if exists "cpg_settings_update_active_volunteers" on public.cpg_booking_settings;
 create policy "cpg_settings_update_active_volunteers"
 on public.cpg_booking_settings
 for update
 to authenticated
-using (public.cpg_is_active_volunteer())
-with check (public.cpg_is_active_volunteer());
+using (public.cpg_is_admin())
+with check (public.cpg_is_admin());
 
 drop policy if exists "cpg_waitlist_all_active_volunteers" on public.cpg_waitlist;
 create policy "cpg_waitlist_all_active_volunteers"
 on public.cpg_waitlist
 for all
 to authenticated
-using (public.cpg_is_active_volunteer())
-with check (public.cpg_is_active_volunteer());
+using (public.cpg_is_admin())
+with check (public.cpg_is_admin());
 
 create or replace function public.cpg_request_booking_by_phone(
   p_phone_e164 text,

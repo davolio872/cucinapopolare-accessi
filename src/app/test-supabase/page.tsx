@@ -7,6 +7,7 @@ export default async function TestSupabasePage() {
 
   if (!user) redirect("/login");
   if (profile?.attivo === false) redirect("/auth/signout?reason=inactive");
+  if (profile?.ruolo !== "admin" && user.email !== "admin") redirect("/");
 
   return (
     <main className="min-h-screen bg-white px-4 py-8 text-black">

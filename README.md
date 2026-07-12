@@ -110,11 +110,34 @@ Ruoli ammessi:
 - `admin`
 - `operatore`
 
+Differenza tra i ruoli:
+
+- `admin`: accesso completo a dashboard, prenotazioni, calendario, statistiche, comunicazioni, anagrafica, importazione Excel e registrazione ingressi.
+- `operatore`: accesso limitato alla sola schermata `Nuovo ingresso`, con scanner QR/campo tessera e registrazione presenza.
+
+L'operatore non deve gestire anagrafica, importazioni, statistiche o log comunicazioni. A livello database puo leggere utenti e ingressi necessari al riconoscimento, e puo scrivere solo stati di ingresso `Presente` o `Senza prenotazione`.
+
 Per disattivare un volontario:
 
 ```sql
 update public.profiles
 set attivo = false
+where id = 'UUID_UTENTE_AUTH';
+```
+
+Per promuovere un volontario ad amministratore:
+
+```sql
+update public.profiles
+set ruolo = 'admin'
+where id = 'UUID_UTENTE_AUTH';
+```
+
+Per renderlo operatore limitato:
+
+```sql
+update public.profiles
+set ruolo = 'operatore'
 where id = 'UUID_UTENTE_AUTH';
 ```
 

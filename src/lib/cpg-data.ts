@@ -44,35 +44,45 @@ export function normalizePhoneForContact(phone: string) {
 
 export async function loadOperationalState(
   supabase: SupabaseClient,
+  options: { includeCommunicationLogs?: boolean; entryDate?: string } = {},
 ): Promise<AppState> {
+  const usersQuery = supabase
+    .from("cpg_users")
+    .select("id,card_number,first_name,last_name,phone,active,notes")
+    .order("card_number", { ascending: true });
+  let entriesQuery = supabase
+    .from("cpg_daily_entries")
+    .select("user_id,entry_date,status,entry_time,booking_channel,source_phone,booked_at")
+    .order("entry_date", { ascending: false });
+
+  if (options.entryDate) {
+    entriesQuery = entriesQuery.eq("entry_date", options.entryDate);
+  }
+
   const [
     { data: users, error: usersError },
     { data: entries, error: entriesError },
-    { data: communicationLogs, error: logsError },
+    logsResult,
   ] = await Promise.all([
-      supabase
-        .from("cpg_users")
-        .select("id,card_number,first_name,last_name,phone,active,notes")
-        .order("card_number", { ascending: true }),
-      supabase
-        .from("cpg_daily_entries")
-        .select("user_id,entry_date,status,entry_time,booking_channel,source_phone,booked_at")
-        .order("entry_date", { ascending: false }),
-      supabase
-        .from("cpg_communication_logs")
-        .select("id,user_id,channel,direction,phone_e164,body,provider_message_id,status,created_at")
-        .order("created_at", { ascending: false })
-        .limit(200),
-    ]);
+    usersQuery,
+    entriesQuery,
+    options.includeCommunicationLogs
+      ? supabase
+          .from("cpg_communication_logs")
+          .select("id,user_id,channel,direction,phone_e164,body,provider_message_id,status,created_at")
+          .order("created_at", { ascending: false })
+          .limit(200)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
 
   if (usersError) throw new Error(usersError.message);
   if (entriesError) throw new Error(entriesError.message);
-  if (logsError) throw new Error(logsError.message);
+  if (logsResult.error) throw new Error(logsResult.error.message);
 
   return {
     users: ((users ?? []) as CpgUserRow[]).map(fromUserRow),
     entries: ((entries ?? []) as CpgEntryRow[]).map(fromEntryRow),
-    communicationLogs: ((communicationLogs ?? []) as CpgCommunicationLogRow[]).map(fromLogRow),
+    communicationLogs: ((logsResult.data ?? []) as CpgCommunicationLogRow[]).map(fromLogRow),
   };
 }
 

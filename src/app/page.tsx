@@ -12,9 +12,13 @@ export default async function Home() {
   if (profile?.attivo === false) redirect("/auth/signout?reason=inactive");
 
   const dataMode = user.id === "demo-admin" ? "demo" : "supabase";
+  const role = profile?.ruolo === "admin" || user.id === "demo-admin" ? "admin" : "operatore";
   const initialState =
     dataMode === "supabase"
-      ? await loadOperationalState(await createClient())
+      ? await loadOperationalState(await createClient(), {
+          includeCommunicationLogs: role === "admin",
+          entryDate: role === "operatore" ? todayKey() : undefined,
+        })
       : createDemoState(todayKey());
 
   return (

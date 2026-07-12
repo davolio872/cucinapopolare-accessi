@@ -103,6 +103,8 @@ const sections: { id: SectionId; label: string; icon: string }[] = [
   { id: "importa", label: "Importa Excel", icon: "⇩" },
 ];
 
+const operatorSections = sections.filter((section) => section.id === "ingresso");
+
 const emptyUser: Omit<User, "id"> = {
   cardNumber: "",
   firstName: "",
@@ -225,7 +227,11 @@ export function CucinaApp({
   initialState: AppState;
   dataMode: "demo" | "supabase";
 }) {
-  const [activeSection, setActiveSection] = useState<SectionId>("dashboard");
+  const accessRole = volunteer.profile?.ruolo === "admin" ? "admin" : "operatore";
+  const availableSections = accessRole === "admin" ? sections : operatorSections;
+  const [activeSection, setActiveSection] = useState<SectionId>(
+    accessRole === "admin" ? "dashboard" : "ingresso",
+  );
   const [state, setState] = useState<AppState>(() => initialState);
   const [loaded, setLoaded] = useState(dataMode === "supabase");
   const [notice, setNotice] = useState("");
@@ -288,7 +294,10 @@ export function CucinaApp({
   function refreshData() {
     if (!supabase) return;
     setRefreshing(true);
-    void loadOperationalState(supabase)
+    void loadOperationalState(supabase, {
+      includeCommunicationLogs: accessRole === "admin",
+      entryDate: accessRole === "operatore" ? today : undefined,
+    })
       .then((nextState) => {
         setState(nextState);
         showNotice("Dati aggiornati.");
@@ -428,7 +437,7 @@ export function CucinaApp({
         <aside className="hidden w-72 shrink-0 border-r-2 border-black bg-white p-5 md:block">
           <Brand />
           <nav className="mt-8 space-y-2">
-            {sections.map((section) => (
+            {availableSections.map((section) => (
               <NavButton
                 key={section.id}
                 section={section}
@@ -451,7 +460,9 @@ export function CucinaApp({
                   {dataMode === "supabase"
                     ? saving
                       ? "Supabase: salvataggio..."
-                      : "Supabase: dati reali"
+                      : accessRole === "admin"
+                        ? "Supabase: accesso amministratore"
+                        : "Supabase: accesso operatore"
                     : "Modalita demo locale"}
                 </p>
               </div>
@@ -462,7 +473,7 @@ export function CucinaApp({
                 className="h-12 rounded-md border-2 border-black bg-white px-3 text-base font-semibold md:hidden"
                 aria-label="Menu sezioni"
               >
-                {sections.map((section) => (
+                {availableSections.map((section) => (
                   <option key={section.id} value={section.id}>
                     {section.label}
                   </option>
@@ -478,10 +489,14 @@ export function CucinaApp({
           ) : null}
 
           <div className="px-4 py-6 md:px-8">
-            {activeSection === "dashboard" ? (
-              <Dashboard stats={stats} setActiveSection={setActiveSection} />
+            {activeSection === "dashboard" && accessRole === "admin" ? (
+              <Dashboard
+                stats={stats}
+                setActiveSection={setActiveSection}
+                sections={availableSections}
+              />
             ) : null}
-            {activeSection === "prenotazioni" ? (
+            {activeSection === "prenotazioni" && accessRole === "admin" ? (
               <Bookings users={state.users} entries={todayEntries} onRegister={registerPresence} />
             ) : null}
             {activeSection === "ingresso" ? (
@@ -492,13 +507,13 @@ export function CucinaApp({
                 onRegister={registerWalkIn}
               />
             ) : null}
-            {activeSection === "calendario" ? (
+            {activeSection === "calendario" && accessRole === "admin" ? (
               <CalendarHistory users={state.users} entries={state.entries} />
             ) : null}
-            {activeSection === "statistiche" ? (
+            {activeSection === "statistiche" && accessRole === "admin" ? (
               <Statistics users={state.users} entries={state.entries} />
             ) : null}
-            {activeSection === "comunicazioni" ? (
+            {activeSection === "comunicazioni" && accessRole === "admin" ? (
               <Communications
                 users={state.users}
                 logs={state.communicationLogs}
@@ -506,7 +521,7 @@ export function CucinaApp({
                 refreshing={refreshing}
               />
             ) : null}
-            {activeSection === "utenti" ? (
+            {activeSection === "utenti" && accessRole === "admin" ? (
               <UsersRegistry
                 users={state.users}
                 onSave={upsertUser}
@@ -514,7 +529,7 @@ export function CucinaApp({
                 onToggleActive={deactivateUser}
               />
             ) : null}
-            {activeSection === "importa" ? (
+            {activeSection === "importa" && accessRole === "admin" ? (
               <ImportPage
                 users={state.users}
                 onApply={(preview, strategy) => {
@@ -537,12 +552,14 @@ function UserMenu({ volunteer }: { volunteer: AuthenticatedVolunteer }) {
   const fullName = [volunteer.profile?.nome, volunteer.profile?.cognome]
     .filter(Boolean)
     .join(" ");
+  const roleLabel = volunteer.profile?.ruolo === "admin" ? "Amministratore" : "Operatore";
 
   return (
     <div className="flex items-center gap-3 rounded-md border-2 border-black bg-white px-3 py-2">
       <div className="hidden text-right sm:block">
         {fullName ? <p className="text-sm font-bold">{fullName}</p> : null}
         <p className="text-xs text-zinc-700">{volunteer.email}</p>
+        <p className="text-xs font-bold text-black">{roleLabel}</p>
       </div>
       <form action="/auth/signout" method="post">
         <button
@@ -609,9 +626,11 @@ function SectionHeader({ title, description }: { title: string; description: str
 function Dashboard({
   stats,
   setActiveSection,
+  sections,
 }: {
   stats: Record<string, number>;
   setActiveSection: (section: SectionId) => void;
+  sections: { id: SectionId; label: string; icon: string }[];
 }) {
   const cards = [
     ["Utenti attivi", stats.activeUsers],
@@ -635,7 +654,7 @@ function Dashboard({
         ))}
       </div>
       <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {sections.slice(1).map((section) => (
+        {sections.filter((section) => section.id !== "dashboard").map((section) => (
           <button
             key={section.id}
             type="button"
