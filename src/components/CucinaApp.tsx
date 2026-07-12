@@ -2,6 +2,7 @@
 
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import jsQR from "jsqr";
 import { createDemoState } from "@/data/demo-data";
 import {
   deleteOperationalUser,
@@ -37,19 +38,6 @@ type SectionId =
 const storageKey = "cucina-popolare-demo-state-v1";
 const today = todayKey();
 
-type DetectedBarcode = {
-  rawValue: string;
-};
-
-type BarcodeDetectorConstructor = new (options?: { formats?: string[] }) => {
-  detect(source: CanvasImageSource): Promise<DetectedBarcode[]>;
-};
-
-type WindowWithBarcodeDetector = Window &
-  typeof globalThis & {
-    BarcodeDetector?: BarcodeDetectorConstructor;
-  };
-
 function waitForVideoReady(video: HTMLVideoElement) {
   if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return Promise.resolve();
 
@@ -80,6 +68,28 @@ function waitForVideoReady(video: HTMLVideoElement) {
     video.addEventListener("canplay", onReady);
     video.addEventListener("error", onError);
   });
+}
+
+function readQrFromVideo(video: HTMLVideoElement, canvas: HTMLCanvasElement) {
+  const sourceWidth = video.videoWidth;
+  const sourceHeight = video.videoHeight;
+  if (!sourceWidth || !sourceHeight) return "";
+
+  const targetWidth = Math.min(sourceWidth, 960);
+  const targetHeight = Math.round((sourceHeight / sourceWidth) * targetWidth);
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return "";
+
+  context.drawImage(video, 0, 0, targetWidth, targetHeight);
+  const imageData = context.getImageData(0, 0, targetWidth, targetHeight);
+  const result = jsQR(imageData.data, targetWidth, targetHeight, {
+    inversionAttempts: "attemptBoth",
+  });
+
+  return result?.data ?? "";
 }
 
 const sections: { id: SectionId; label: string; icon: string }[] = [
@@ -701,6 +711,7 @@ function NewEntry({
   const [scannerActive, setScannerActive] = useState(false);
   const [scannerMessage, setScannerMessage] = useState("Scanner non attivo.");
   const videoRef = useRef<HTMLVideoElement>(null);
+  const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const scannerFrameRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanInProgressRef = useRef(false);
@@ -773,12 +784,6 @@ function NewEntry({
   async function startScanner() {
     stopScanner(false);
 
-    const barcodeWindow = window as WindowWithBarcodeDetector;
-    if (!barcodeWindow.BarcodeDetector) {
-      setScannerMessage("Scanner QR non supportato da questo browser. Usa il campo tessera manuale.");
-      return;
-    }
-
     if (!navigator.mediaDevices?.getUserMedia) {
       setScannerMessage("Fotocamera non disponibile. Apri il gestionale da Chrome aggiornato e connessione HTTPS.");
       return;
@@ -809,7 +814,8 @@ function NewEntry({
         await waitForVideoReady(videoRef.current);
       }
 
-      const detector = new barcodeWindow.BarcodeDetector({ formats: ["qr_code"] });
+      const canvas = qrCanvasRef.current ?? document.createElement("canvas");
+      qrCanvasRef.current = canvas;
       setScannerActive(true);
       setScannerMessage("Inquadra il QR al centro, con buona luce e tessera ferma.");
 
@@ -825,8 +831,7 @@ function NewEntry({
           scanInProgressRef.current = true;
           lastScanAtRef.current = timestamp;
           try {
-            const codes = await detector.detect(videoRef.current);
-            const code = codes[0]?.rawValue;
+            const code = readQrFromVideo(videoRef.current, canvas);
             if (code) {
               selectFromQr(code);
               stopScanner();
