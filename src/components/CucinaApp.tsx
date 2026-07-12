@@ -5,6 +5,7 @@ import Image from "next/image";
 import { createDemoState } from "@/data/demo-data";
 import {
   deleteOperationalUser,
+  loadOperationalState,
   upsertOperationalEntry,
   upsertOperationalUser,
   upsertOperationalUsers,
@@ -129,6 +130,7 @@ export function CucinaApp({
   const [loaded, setLoaded] = useState(dataMode === "supabase");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const supabase = useMemo(
     () => (dataMode === "supabase" ? createClient() : null),
     [dataMode],
@@ -181,6 +183,20 @@ export function CucinaApp({
         showNotice("Salvataggio non riuscito. Controlla connessione e permessi Supabase.");
       })
       .finally(() => setSaving(false));
+  }
+
+  function refreshData() {
+    if (!supabase) return;
+    setRefreshing(true);
+    void loadOperationalState(supabase)
+      .then((nextState) => {
+        setState(nextState);
+        showNotice("Dati aggiornati.");
+      })
+      .catch(() => {
+        showNotice("Aggiornamento non riuscito. Controlla connessione e permessi Supabase.");
+      })
+      .finally(() => setRefreshing(false));
   }
 
   function setEntry(userId: string, status: AttendanceStatus, entryTime?: string) {
@@ -383,7 +399,12 @@ export function CucinaApp({
               <Statistics users={state.users} entries={state.entries} />
             ) : null}
             {activeSection === "comunicazioni" ? (
-              <Communications users={state.users} logs={state.communicationLogs} />
+              <Communications
+                users={state.users}
+                logs={state.communicationLogs}
+                onRefresh={dataMode === "supabase" ? refreshData : undefined}
+                refreshing={refreshing}
+              />
             ) : null}
             {activeSection === "utenti" ? (
               <UsersRegistry
@@ -823,7 +844,6 @@ function Statistics({ users, entries }: { users: User[]; entries: DailyEntry[] }
   const channels: { label: string; value: number }[] = [
     ["Manuale", entries.filter((entry) => entry.bookingChannel === "manuale").length],
     ["SMS", entries.filter((entry) => entry.bookingChannel === "sms").length],
-    ["WhatsApp", entries.filter((entry) => entry.bookingChannel === "whatsapp").length],
     ["Telefono", entries.filter((entry) => entry.bookingChannel === "telefono").length],
   ].map(([label, value]) => ({ label: String(label), value: Number(value) }));
   const maxChannel = Math.max(1, ...channels.map((channel) => channel.value));
@@ -913,25 +933,64 @@ function Statistics({ users, entries }: { users: User[]; entries: DailyEntry[] }
 function Communications({
   users,
   logs,
+  onRefresh,
+  refreshing = false,
 }: {
   users: User[];
   logs: AppState["communicationLogs"];
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }) {
-  const [channel, setChannel] = useState<"all" | "sms" | "whatsapp" | "telefono" | "manuale">("all");
+  const [channel, setChannel] = useState<"all" | "sms" | "telefono">("all");
   const [status, setStatus] = useState("all");
-  const statuses = Array.from(new Set(logs.map((log) => log.status))).sort();
-  const filtered = logs.filter((log) => {
+  const gatewayLogs = logs.filter((log) => log.channel === "sms" || log.channel === "telefono");
+  const statuses = Array.from(new Set(gatewayLogs.map((log) => log.status))).sort();
+  const filtered = gatewayLogs.filter((log) => {
     if (channel !== "all" && log.channel !== channel) return false;
     if (status !== "all" && log.status !== status) return false;
     return true;
   });
+  const confirmed = gatewayLogs.filter((log) => log.status === "prenotazione_confermata").length;
+  const unknown = gatewayLogs.filter((log) => log.status === "numero_non_riconosciuto").length;
+  const calls = gatewayLogs.filter((log) => log.channel === "telefono").length;
+  const sms = gatewayLogs.filter((log) => log.channel === "sms").length;
+  const latest = gatewayLogs[0];
 
   return (
     <section>
       <SectionHeader
-        title="Comunicazioni"
-        description="Controlla messaggi ricevuti, prenotazioni confermate, numeri non riconosciuti e richieste finite in lista attesa."
+        title="Gateway SMS e telefono"
+        description="Controlla messaggi e chiamate ricevute dal telefono gateway, prenotazioni confermate e numeri non riconosciuti."
       />
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <Metric label="Eventi gateway" value={gatewayLogs.length} />
+        <Metric label="SMS" value={sms} />
+        <Metric label="Telefonate" value={calls} />
+        <Metric label="Confermate" value={confirmed} />
+        <Metric label="Non riconosciuti" value={unknown} />
+      </div>
+      <div className="mb-5 rounded-md border-2 border-black bg-yellow-100 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-xl font-bold">Stato operativo</h2>
+            <p className="mt-1 text-sm text-zinc-700">
+              {latest
+                ? `Ultimo evento: ${channelLabel(latest.channel)} da ${latest.phone || "numero non disponibile"}`
+                : "Nessun evento gateway registrato."}
+            </p>
+          </div>
+          {onRefresh ? (
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={refreshing}
+              className="h-12 rounded-md border-2 border-black bg-black px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-zinc-500"
+            >
+              {refreshing ? "Aggiorno..." : "Aggiorna dati"}
+            </button>
+          ) : null}
+        </div>
+      </div>
       <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-[220px_260px_1fr]">
         <select
           value={channel}
@@ -940,9 +999,7 @@ function Communications({
         >
           <option value="all">Tutti i canali</option>
           <option value="sms">SMS</option>
-          <option value="whatsapp">WhatsApp</option>
           <option value="telefono">Telefono</option>
-          <option value="manuale">Manuale</option>
         </select>
         <select
           value={status}
@@ -957,17 +1014,9 @@ function Communications({
           ))}
         </select>
         <div className="grid grid-cols-3 gap-2">
-          <Metric label="Totali" value={logs.length} small />
-          <Metric
-            label="Confermate"
-            value={logs.filter((log) => log.status === "prenotazione_confermata").length}
-            small
-          />
-          <Metric
-            label="Non ric."
-            value={logs.filter((log) => log.status === "numero_non_riconosciuto").length}
-            small
-          />
+          <Metric label="Filtrati" value={filtered.length} small />
+          <Metric label="Ok" value={confirmed} small />
+          <Metric label="Non ric." value={unknown} small />
         </div>
       </div>
       <ResponsiveTable

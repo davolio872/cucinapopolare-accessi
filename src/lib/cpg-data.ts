@@ -90,7 +90,6 @@ export async function upsertOperationalUser(
 
   const contacts = [
     { user_id: user.id, channel: "sms", phone_e164: phone, enabled: user.active },
-    { user_id: user.id, channel: "whatsapp", phone_e164: phone, enabled: user.active },
     { user_id: user.id, channel: "telefono", phone_e164: phone, enabled: user.active },
   ];
 
