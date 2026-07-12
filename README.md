@@ -207,6 +207,69 @@ Quando arriva un SMS con testo `PRENOTO`, il webhook:
 4. risponde a Twilio in formato TwiML;
 5. rende il log visibile nella sezione "Comunicazioni".
 
+## Gateway Android Con SIM
+
+Per evitare costi Twilio e usare una normale SIM, e stato aggiunto un progetto Android privato in:
+
+```text
+android-sms-gateway/
+```
+
+L'app "Gateway Cucina Popolare" e pensata per un telefono Android dedicato, con SIM della Cucina Popolare. Non deve essere pubblicata su Play Store nella prima fase.
+
+Endpoint applicazione:
+
+```text
+POST /api/webhooks/android-gateway
+```
+
+URL produzione:
+
+```text
+https://cucinapopolare-accessi.vercel.app/api/webhooks/android-gateway
+```
+
+Variabili Vercel da configurare:
+
+```bash
+CPG_WEBHOOK_SECRET=...
+ANDROID_GATEWAY_SECRET=...
+```
+
+`CPG_WEBHOOK_SECRET` deve corrispondere al segreto salvato hashato in Supabase. `ANDROID_GATEWAY_SECRET` e il segreto che l'app Android usera per autenticarsi verso il gestionale.
+
+Flusso SMS:
+
+1. Il telefono riceve un SMS.
+2. Se il testo contiene `PRENOTO`, l'app invia numero e testo al gestionale.
+3. Il gestionale cerca il numero in `cpg_contacts`.
+4. Se la persona e registrata e attiva, crea la prenotazione.
+5. L'app risponde via SMS con l'esito restituito dal gestionale.
+
+Flusso telefonate:
+
+1. Il telefono rileva una chiamata in arrivo.
+2. Se il numero e registrato, il gestionale registra una richiesta con canale `telefono`.
+3. L'app invia un SMS automatico con conferma o errore.
+
+Nota importante: Android permette di rilevare SMS e stato chiamata solo con permessi espliciti sul telefono. Un vero risponditore vocale automatico, con audio in chiamata, richiede una soluzione telefonica piu avanzata o permessi/ruoli di dialer non sempre affidabili sui dispositivi comuni. La prima versione usa quindi risposta automatica via SMS alla chiamata ricevuta.
+
+WhatsApp:
+
+- Il canale `whatsapp` e gia presente nel database e nell'endpoint.
+- L'app WhatsApp normale non offre un webhook locale ufficiale per leggere e rispondere automaticamente ai messaggi.
+- Per WhatsApp automatico affidabile bisognera usare WhatsApp Business Platform/Cloud API oppure valutare una fase sperimentale separata, sapendo che soluzioni basate su automazione schermo/accessibilita sono fragili.
+
+Configurazione app Android:
+
+1. Apri `android-sms-gateway/` con Android Studio.
+2. Compila e installa l'APK sul telefono con SIM dedicata.
+3. Concedi i permessi SMS, telefono e rete.
+4. Inserisci come URL endpoint `https://cucinapopolare-accessi.vercel.app/api/webhooks/android-gateway`.
+5. Inserisci lo stesso valore configurato in Vercel come `ANDROID_GATEWAY_SECRET`.
+6. Attiva le risposte automatiche SMS e chiamate.
+7. Prova da un numero presente in `cpg_contacts` inviando `PRENOTO`.
+
 ## Formato Excel O CSV
 
 Il file puo essere `.xlsx`, `.xls` o `.csv`, massimo 5 MB e 2.000 righe.
@@ -236,4 +299,5 @@ Il campo `attivo` accetta `si`, `no`, `true`, `false`, `1`, `0`, `attivo`, `non 
 - Il login demo usa dati fittizi nel `localStorage`.
 - I dati reali richiedono accesso con volontario Supabase Auth e profilo attivo.
 - Gli endpoint SMS, WhatsApp e telefonia non sono ancora collegati al provider.
+- Il gateway Android e predisposto ma va compilato e testato su telefono reale.
 - Non include ancora invio notifiche, QR code, PDF o permessi amministrativi avanzati.
