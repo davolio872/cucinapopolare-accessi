@@ -130,5 +130,6 @@ export function createDemoState(date: string): AppState {
   return {
     users: demoUsers,
     entries: createDemoEntries(date),
+    communicationLogs: [],
   };
 }

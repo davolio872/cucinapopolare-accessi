@@ -11,6 +11,11 @@ insert into public.cpg_app_config (key, value)
 values ('access_pin_hash', extensions.crypt('cucina2026', extensions.gen_salt('bf')))
 on conflict (key) do nothing;
 
+-- Change this secret before wiring production providers.
+insert into public.cpg_app_config (key, value)
+values ('webhook_secret_hash', extensions.crypt('change-me-webhook-secret', extensions.gen_salt('bf')))
+on conflict (key) do nothing;
+
 create table if not exists public.cpg_users (
   id text primary key,
   card_number text not null unique,
@@ -132,6 +137,23 @@ as $$
   );
 $$;
 
+create or replace function public.cpg_webhook_secret_ok(p_secret text)
+returns boolean
+language sql
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+  select coalesce(
+    exists (
+      select 1
+      from public.cpg_app_config
+      where key = 'webhook_secret_hash'
+        and value = extensions.crypt(coalesce(p_secret, ''), value)
+    ),
+    false
+  );
+$$;
+
 create or replace function public.cpg_get_state(p_pin text, p_date date default current_date)
 returns jsonb
 language plpgsql
@@ -227,6 +249,7 @@ end;
 $$;
 
 grant execute on function public.cpg_pin_ok(text) to anon, authenticated;
+grant execute on function public.cpg_webhook_secret_ok(text) to anon, authenticated;
 grant execute on function public.cpg_get_state(text, date) to anon, authenticated;
 grant execute on function public.cpg_save_state(text, jsonb) to anon, authenticated;
 
@@ -550,3 +573,141 @@ end;
 $$;
 
 grant execute on function public.cpg_request_booking_by_phone(text, text, date, text, text) to authenticated;
+
+create or replace function public.cpg_request_booking_by_phone_webhook(
+  p_secret text,
+  p_phone_e164 text,
+  p_channel text,
+  p_entry_date date default current_date,
+  p_body text default null,
+  p_provider_message_id text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_contact record;
+  v_settings public.cpg_booking_settings%rowtype;
+  v_booked_count integer;
+  v_log_id uuid;
+  v_waitlisted boolean := false;
+begin
+  if not public.cpg_webhook_secret_ok(p_secret) then
+    raise exception 'Webhook non autorizzato' using errcode = '28000';
+  end if;
+
+  if p_channel not in ('sms', 'whatsapp', 'telefono') then
+    raise exception 'Canale non valido' using errcode = '22023';
+  end if;
+
+  insert into public.cpg_communication_logs (
+    channel, direction, phone_e164, body, provider_message_id, status
+  )
+  values (p_channel, 'inbound', p_phone_e164, p_body, p_provider_message_id, 'ricevuto')
+  returning id into v_log_id;
+
+  select c.*, u.active
+  into v_contact
+  from public.cpg_contacts c
+  join public.cpg_users u on u.id = c.user_id
+  where c.phone_e164 = p_phone_e164
+    and c.channel = p_channel
+    and c.enabled = true
+  limit 1;
+
+  if v_contact.user_id is null then
+    update public.cpg_communication_logs
+    set status = 'numero_non_riconosciuto',
+        metadata = jsonb_build_object('entry_date', p_entry_date)
+    where id = v_log_id;
+
+    return jsonb_build_object(
+      'ok', false,
+      'code', 'numero_non_riconosciuto',
+      'message', 'Numero non riconosciuto. Contatta un operatore o comunica il numero tessera.'
+    );
+  end if;
+
+  if v_contact.active = false then
+    update public.cpg_communication_logs
+    set user_id = v_contact.user_id,
+        status = 'utente_non_attivo',
+        metadata = jsonb_build_object('entry_date', p_entry_date)
+    where id = v_log_id;
+
+    return jsonb_build_object(
+      'ok', false,
+      'code', 'utente_non_attivo',
+      'message', 'Profilo non attivo. Contatta la Cucina Popolare.'
+    );
+  end if;
+
+  select * into v_settings
+  from public.cpg_booking_settings
+  where id = 1;
+
+  select count(*) into v_booked_count
+  from public.cpg_daily_entries
+  where entry_date = p_entry_date
+    and status in ('Prenotato', 'Presente');
+
+  if v_booked_count >= coalesce(v_settings.daily_capacity, 120) then
+    if coalesce(v_settings.allow_waitlist, true) then
+      insert into public.cpg_waitlist (
+        user_id, entry_date, requested_channel, source_phone
+      )
+      values (v_contact.user_id, p_entry_date, p_channel, p_phone_e164)
+      on conflict (user_id, entry_date) do nothing;
+
+      v_waitlisted := true;
+    end if;
+
+    update public.cpg_communication_logs
+    set user_id = v_contact.user_id,
+        status = case when v_waitlisted then 'lista_attesa' else 'capienza_esaurita' end,
+        metadata = jsonb_build_object('entry_date', p_entry_date)
+    where id = v_log_id;
+
+    return jsonb_build_object(
+      'ok', false,
+      'code', case when v_waitlisted then 'lista_attesa' else 'capienza_esaurita' end,
+      'message', case when v_waitlisted then 'Posti esauriti: sei in lista di attesa.' else 'Posti esauriti.' end
+    );
+  end if;
+
+  insert into public.cpg_daily_entries (
+    user_id, entry_date, status, booking_channel, source_phone, booked_at, updated_at
+  )
+  values (
+    v_contact.user_id, p_entry_date, 'Prenotato', p_channel, p_phone_e164, now(), now()
+  )
+  on conflict (user_id, entry_date) do update
+  set status = case
+        when public.cpg_daily_entries.status in ('Presente', 'Senza prenotazione')
+        then public.cpg_daily_entries.status
+        else excluded.status
+      end,
+      booking_channel = excluded.booking_channel,
+      source_phone = excluded.source_phone,
+      booked_at = coalesce(public.cpg_daily_entries.booked_at, excluded.booked_at),
+      updated_at = now();
+
+  update public.cpg_communication_logs
+  set user_id = v_contact.user_id,
+      status = 'prenotazione_confermata',
+      metadata = jsonb_build_object('entry_date', p_entry_date)
+  where id = v_log_id;
+
+  return jsonb_build_object(
+    'ok', true,
+    'code', 'prenotazione_confermata',
+    'userId', v_contact.user_id,
+    'date', p_entry_date,
+    'message', 'Prenotazione confermata.'
+  );
+end;
+$$;
+
+grant execute on function public.cpg_request_booking_by_phone_webhook(text, text, text, date, text, text) to anon, authenticated;

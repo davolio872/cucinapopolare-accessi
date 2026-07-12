@@ -29,6 +29,7 @@ type SectionId =
   | "ingresso"
   | "calendario"
   | "statistiche"
+  | "comunicazioni"
   | "utenti"
   | "importa";
 
@@ -41,6 +42,7 @@ const sections: { id: SectionId; label: string; icon: string }[] = [
   { id: "ingresso", label: "Nuovo ingresso", icon: "+" },
   { id: "calendario", label: "Calendario", icon: "C" },
   { id: "statistiche", label: "Statistiche", icon: "%" },
+  { id: "comunicazioni", label: "Comunicazioni", icon: "M" },
   { id: "utenti", label: "Anagrafica", icon: "◉" },
   { id: "importa", label: "Importa Excel", icon: "⇩" },
 ];
@@ -274,6 +276,7 @@ export function CucinaApp({
     const confirmed = window.confirm("Confermi l'eliminazione dell'utente?");
     if (!confirmed) return;
     commitState((previous) => ({
+      ...previous,
       users: previous.users.filter((user) => user.id !== userId),
       entries: previous.entries.filter((entry) => entry.userId !== userId),
     }));
@@ -378,6 +381,9 @@ export function CucinaApp({
             ) : null}
             {activeSection === "statistiche" ? (
               <Statistics users={state.users} entries={state.entries} />
+            ) : null}
+            {activeSection === "comunicazioni" ? (
+              <Communications users={state.users} logs={state.communicationLogs} />
             ) : null}
             {activeSection === "utenti" ? (
               <UsersRegistry
@@ -900,6 +906,90 @@ function Statistics({ users, entries }: { users: User[]; entries: DailyEntry[] }
           ])}
         />
       </div>
+    </section>
+  );
+}
+
+function Communications({
+  users,
+  logs,
+}: {
+  users: User[];
+  logs: AppState["communicationLogs"];
+}) {
+  const [channel, setChannel] = useState<"all" | "sms" | "whatsapp" | "telefono" | "manuale">("all");
+  const [status, setStatus] = useState("all");
+  const statuses = Array.from(new Set(logs.map((log) => log.status))).sort();
+  const filtered = logs.filter((log) => {
+    if (channel !== "all" && log.channel !== channel) return false;
+    if (status !== "all" && log.status !== status) return false;
+    return true;
+  });
+
+  return (
+    <section>
+      <SectionHeader
+        title="Comunicazioni"
+        description="Controlla messaggi ricevuti, prenotazioni confermate, numeri non riconosciuti e richieste finite in lista attesa."
+      />
+      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-[220px_260px_1fr]">
+        <select
+          value={channel}
+          onChange={(event) => setChannel(event.target.value as typeof channel)}
+          className="h-12 rounded-md border-2 border-black bg-white px-3"
+        >
+          <option value="all">Tutti i canali</option>
+          <option value="sms">SMS</option>
+          <option value="whatsapp">WhatsApp</option>
+          <option value="telefono">Telefono</option>
+          <option value="manuale">Manuale</option>
+        </select>
+        <select
+          value={status}
+          onChange={(event) => setStatus(event.target.value)}
+          className="h-12 rounded-md border-2 border-black bg-white px-3"
+        >
+          <option value="all">Tutti gli stati</option>
+          {statuses.map((item) => (
+            <option key={item} value={item}>
+              {item}
+            </option>
+          ))}
+        </select>
+        <div className="grid grid-cols-3 gap-2">
+          <Metric label="Totali" value={logs.length} small />
+          <Metric
+            label="Confermate"
+            value={logs.filter((log) => log.status === "prenotazione_confermata").length}
+            small
+          />
+          <Metric
+            label="Non ric."
+            value={logs.filter((log) => log.status === "numero_non_riconosciuto").length}
+            small
+          />
+        </div>
+      </div>
+      <ResponsiveTable
+        headers={["Data", "Canale", "Numero", "Persona", "Messaggio", "Stato"]}
+        rows={filtered.map((log) => {
+          const user = users.find((item) => item.id === log.userId);
+          return [
+            new Intl.DateTimeFormat("it-IT", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            }).format(new Date(log.createdAt)),
+            channelLabel(log.channel),
+            log.phone || "-",
+            user ? `${user.cardNumber} - ${user.firstName} ${user.lastName}` : "-",
+            log.body || "-",
+            log.status,
+          ];
+        })}
+      />
     </section>
   );
 }

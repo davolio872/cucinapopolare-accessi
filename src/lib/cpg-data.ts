@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AppState, DailyEntry, User } from "@/types";
+import type { AppState, CommunicationLog, DailyEntry, User } from "@/types";
 
 type CpgUserRow = {
   id: string;
@@ -21,6 +21,18 @@ type CpgEntryRow = {
   booked_at: string | null;
 };
 
+type CpgCommunicationLogRow = {
+  id: string;
+  user_id: string | null;
+  channel: CommunicationLog["channel"];
+  direction: CommunicationLog["direction"];
+  phone_e164: string | null;
+  body: string | null;
+  provider_message_id: string | null;
+  status: string;
+  created_at: string;
+};
+
 export function normalizePhoneForContact(phone: string) {
   const compact = phone.replace(/[\s().-]+/g, "").trim();
   if (!compact) return "";
@@ -33,8 +45,11 @@ export function normalizePhoneForContact(phone: string) {
 export async function loadOperationalState(
   supabase: SupabaseClient,
 ): Promise<AppState> {
-  const [{ data: users, error: usersError }, { data: entries, error: entriesError }] =
-    await Promise.all([
+  const [
+    { data: users, error: usersError },
+    { data: entries, error: entriesError },
+    { data: communicationLogs, error: logsError },
+  ] = await Promise.all([
       supabase
         .from("cpg_users")
         .select("id,card_number,first_name,last_name,phone,active,notes")
@@ -43,14 +58,21 @@ export async function loadOperationalState(
         .from("cpg_daily_entries")
         .select("user_id,entry_date,status,entry_time,booking_channel,source_phone,booked_at")
         .order("entry_date", { ascending: false }),
+      supabase
+        .from("cpg_communication_logs")
+        .select("id,user_id,channel,direction,phone_e164,body,provider_message_id,status,created_at")
+        .order("created_at", { ascending: false })
+        .limit(200),
     ]);
 
   if (usersError) throw new Error(usersError.message);
   if (entriesError) throw new Error(entriesError.message);
+  if (logsError) throw new Error(logsError.message);
 
   return {
     users: ((users ?? []) as CpgUserRow[]).map(fromUserRow),
     entries: ((entries ?? []) as CpgEntryRow[]).map(fromEntryRow),
+    communicationLogs: ((communicationLogs ?? []) as CpgCommunicationLogRow[]).map(fromLogRow),
   };
 }
 
@@ -128,6 +150,20 @@ function fromEntryRow(row: CpgEntryRow): DailyEntry {
     bookingChannel: row.booking_channel ?? undefined,
     sourcePhone: row.source_phone ?? undefined,
     bookedAt: row.booked_at ?? undefined,
+  };
+}
+
+function fromLogRow(row: CpgCommunicationLogRow): CommunicationLog {
+  return {
+    id: row.id,
+    userId: row.user_id ?? undefined,
+    channel: row.channel,
+    direction: row.direction,
+    phone: row.phone_e164 ?? "",
+    body: row.body ?? "",
+    providerMessageId: row.provider_message_id ?? undefined,
+    status: row.status,
+    createdAt: row.created_at,
   };
 }
 

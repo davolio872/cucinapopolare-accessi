@@ -24,9 +24,22 @@ export type DailyEntry = {
   bookedAt?: string;
 };
 
+export type CommunicationLog = {
+  id: string;
+  userId?: string;
+  channel: "sms" | "whatsapp" | "telefono" | "manuale";
+  direction: "inbound" | "outbound" | "internal";
+  phone: string;
+  body: string;
+  providerMessageId?: string;
+  status: string;
+  createdAt: string;
+};
+
 export type AppState = {
   users: User[];
   entries: DailyEntry[];
+  communicationLogs: CommunicationLog[];
 };
 
 export type ImportUserRow = {

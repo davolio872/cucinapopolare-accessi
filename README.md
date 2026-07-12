@@ -142,10 +142,21 @@ La prenotazione manuale salva `booking_channel = 'manuale'`.
 
 ## Predisposizione SMS, WhatsApp E Telefono
 
-Lo schema contiene gia la funzione:
+Lo schema contiene gia le funzioni:
 
 ```sql
 public.cpg_request_booking_by_phone(
+  p_phone_e164 text,
+  p_channel text,
+  p_entry_date date default current_date,
+  p_body text default null,
+  p_provider_message_id text default null
+)
+```
+
+```sql
+public.cpg_request_booking_by_phone_webhook(
+  p_secret text,
   p_phone_e164 text,
   p_channel text,
   p_entry_date date default current_date,
@@ -163,6 +174,38 @@ Canali ammessi:
 La funzione riconosce il numero in `cpg_contacts`, verifica che la persona sia attiva, controlla la capienza giornaliera, crea o aggiorna la prenotazione, registra il log comunicazione e mette in lista di attesa quando la capienza e esaurita.
 
 Non e esposta agli utenti anonimi. Il prossimo passaggio sara creare endpoint server-side protetti da segreto provider per ricevere webhook Twilio/WhatsApp/telefonia e chiamare questa funzione.
+
+## Webhook SMS Twilio
+
+Endpoint applicazione:
+
+```text
+POST /api/webhooks/twilio/sms
+```
+
+URL produzione:
+
+```text
+https://cucinapopolare-accessi.vercel.app/api/webhooks/twilio/sms
+```
+
+Variabili Vercel da configurare:
+
+```bash
+CPG_WEBHOOK_SECRET=...
+TWILIO_AUTH_TOKEN=...
+TWILIO_WEBHOOK_PUBLIC_URL=https://cucinapopolare-accessi.vercel.app/api/webhooks/twilio/sms
+```
+
+`CPG_WEBHOOK_SECRET` deve corrispondere al segreto salvato hashato in `public.cpg_app_config` con chiave `webhook_secret_hash`.
+
+Quando arriva un SMS con testo `PRENOTO`, il webhook:
+
+1. valida la firma Twilio, se `TWILIO_AUTH_TOKEN` e configurato;
+2. normalizza il numero mittente;
+3. chiama la funzione Supabase webhook;
+4. risponde a Twilio in formato TwiML;
+5. rende il log visibile nella sezione "Comunicazioni".
 
 ## Formato Excel O CSV
 
