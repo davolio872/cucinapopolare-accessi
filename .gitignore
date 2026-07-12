@@ -42,3 +42,11 @@ yarn-error.log*
 next-env.d.ts
 
 .vercel
+
+# android
+android-sms-gateway/.gradle/
+android-sms-gateway/.idea/
+android-sms-gateway/.kotlin/
+android-sms-gateway/build/
+android-sms-gateway/app/build/
+android-sms-gateway/local.properties
