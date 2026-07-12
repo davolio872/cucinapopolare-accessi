@@ -22,6 +22,10 @@ class SmsReceiver : BroadcastReceiver() {
                 channel = "sms",
                 providerMessageId = "sms-${System.currentTimeMillis()}",
             )
+            GatewayConfig.saveLastEvent(
+                context,
+                "SMS da $from: ${response.reply}",
+            )
             if (GatewayConfig.isSmsReplyEnabled(context) && response.sendReply && response.reply.isNotBlank()) {
                 sendSms(from, response.reply)
             }

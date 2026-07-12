@@ -13,6 +13,22 @@ data class GatewayResponse(
 )
 
 object GatewayApi {
+    fun testConnection(context: Context): GatewayResponse {
+        val endpoint = GatewayConfig.getUrl(context)
+        val secret = GatewayConfig.getSecret(context)
+        if (endpoint.isBlank() || secret.isBlank()) {
+            return GatewayResponse(false, "Gateway non configurato.", false)
+        }
+
+        val connection = URL(endpoint).openConnection() as HttpURLConnection
+        connection.requestMethod = "GET"
+        connection.connectTimeout = 10000
+        connection.readTimeout = 15000
+        connection.setRequestProperty("X-CPG-Gateway-Secret", secret)
+
+        return readResponse(connection)
+    }
+
     fun requestBooking(
         context: Context,
         from: String,
@@ -44,6 +60,10 @@ object GatewayApi {
             writer.write(payload.toString())
         }
 
+        return readResponse(connection)
+    }
+
+    private fun readResponse(connection: HttpURLConnection): GatewayResponse {
         val stream = if (connection.responseCode in 200..299) {
             connection.inputStream
         } else {

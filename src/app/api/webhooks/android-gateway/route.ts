@@ -21,6 +21,29 @@ type BookingResult = {
 const bookingWords = ["PRENOTO", "PRENOTA", "PRENOTAZIONE", "SI"];
 const allowedChannels = new Set<GatewayChannel>(["sms", "whatsapp", "telefono"]);
 
+export async function GET(request: Request) {
+  const configuredGatewaySecret = process.env.ANDROID_GATEWAY_SECRET;
+  const receivedGatewaySecret = request.headers.get("x-cpg-gateway-secret");
+  if (!configuredGatewaySecret) {
+    return jsonError("Gateway Android non configurato.", 503);
+  }
+
+  if (!receivedGatewaySecret || receivedGatewaySecret !== configuredGatewaySecret) {
+    return jsonError("Gateway Android non autorizzato.", 401);
+  }
+
+  if (!process.env.CPG_WEBHOOK_SECRET) {
+    return jsonError("Servizio prenotazioni non configurato.", 503);
+  }
+
+  return NextResponse.json({
+    ok: true,
+    code: "gateway_configurato",
+    reply: "Connessione al gestionale riuscita.",
+    sendReply: false,
+  });
+}
+
 export async function POST(request: Request) {
   const payload = await readPayload(request);
   if (!payload) {
