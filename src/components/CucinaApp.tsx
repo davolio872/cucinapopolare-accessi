@@ -37,6 +37,19 @@ type SectionId =
 const storageKey = "cucina-popolare-demo-state-v1";
 const today = todayKey();
 
+type DetectedBarcode = {
+  rawValue: string;
+};
+
+type BarcodeDetectorConstructor = new (options?: { formats?: string[] }) => {
+  detect(source: CanvasImageSource): Promise<DetectedBarcode[]>;
+};
+
+type WindowWithBarcodeDetector = Window &
+  typeof globalThis & {
+    BarcodeDetector?: BarcodeDetectorConstructor;
+  };
+
 const sections: { id: SectionId; label: string; icon: string }[] = [
   { id: "dashboard", label: "Dashboard", icon: "⌂" },
   { id: "prenotazioni", label: "Prenotazioni", icon: "✓" },
@@ -109,6 +122,51 @@ function channelLabel(channel?: DailyEntry["bookingChannel"]) {
   if (channel === "telefono") return "Telefono";
   if (channel === "manuale") return "Manuale";
   return "-";
+}
+
+function extractCardNumberFromQr(value: string) {
+  const raw = value.trim();
+  if (!raw) return "";
+
+  try {
+    const parsed = JSON.parse(raw) as {
+      cardNumber?: string;
+      card_number?: string;
+      tessera?: string;
+      id?: string;
+    };
+    return (
+      parsed.cardNumber
+      || parsed.card_number
+      || parsed.tessera
+      || parsed.id
+      || ""
+    ).trim();
+  } catch {
+    // Plain card numbers and simple prefixed values are the normal QR format.
+  }
+
+  const withoutPrefix = raw.replace(/^(CPG|TESSERA|CARD|QR)[:#-]/i, "").trim();
+  try {
+    const url = new URL(withoutPrefix);
+    return (
+      url.searchParams.get("cardNumber")
+      || url.searchParams.get("card_number")
+      || url.searchParams.get("tessera")
+      || url.searchParams.get("card")
+      || url.searchParams.get("id")
+      || url.pathname.split("/").filter(Boolean).at(-1)
+      || ""
+    ).trim();
+  } catch {
+    // Not a URL.
+  }
+
+  if (withoutPrefix.includes("/")) {
+    const candidate = withoutPrefix.split("/").filter(Boolean).at(-1);
+    return candidate?.trim() || "";
+  }
+  return withoutPrefix;
 }
 
 function percent(part: number, total: number) {
@@ -607,6 +665,12 @@ function NewEntry({
 }) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState("");
+  const [manualQr, setManualQr] = useState("");
+  const [scannerActive, setScannerActive] = useState(false);
+  const [scannerMessage, setScannerMessage] = useState("Scanner non attivo.");
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const scannerFrameRef = useRef<number | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const results = useMemo(
     () => sortUsers(users.filter((user) => user.active && matchesUser(user, query))).slice(0, 8),
     [query, users],
@@ -617,13 +681,164 @@ function NewEntry({
     selectedEntry?.status === "Presente" || selectedEntry?.status === "Senza prenotazione";
   const alreadyBooked = Boolean(selectedEntry);
 
+  useEffect(() => {
+    return () => stopScanner(false);
+  }, []);
+
+  function findUserByQr(value: string) {
+    const cardNumber = extractCardNumberFromQr(value);
+    if (!cardNumber) return null;
+
+    return users.find((user) => (
+      user.active
+      && (
+        user.cardNumber.toLowerCase() === cardNumber.toLowerCase()
+        || user.id.toLowerCase() === cardNumber.toLowerCase()
+      )
+    )) ?? null;
+  }
+
+  function selectFromQr(value: string) {
+    const cardNumber = extractCardNumberFromQr(value);
+    const user = findUserByQr(value);
+
+    if (!user) {
+      setScannerMessage(cardNumber ? `Tessera non riconosciuta: ${cardNumber}` : "QR non valido.");
+      return;
+    }
+
+    setSelectedId(user.id);
+    setQuery(user.cardNumber);
+    setScannerMessage(`Tessera letta: ${user.cardNumber} - ${user.firstName} ${user.lastName}`);
+  }
+
+  function confirmAndRegister(user: User) {
+    const entry = entries.find((item) => item.userId === user.id);
+    if (!entry) {
+      const accepted = window.confirm(
+        `${user.firstName} ${user.lastName} non ha una prenotazione per oggi. Vuoi accettare comunque l'ingresso?`,
+      );
+      if (!accepted) return;
+    }
+    onRegister(user);
+  }
+
+  function stopScanner(updateState = true) {
+    if (scannerFrameRef.current) {
+      window.cancelAnimationFrame(scannerFrameRef.current);
+      scannerFrameRef.current = null;
+    }
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (updateState) setScannerActive(false);
+  }
+
+  async function startScanner() {
+    const barcodeWindow = window as WindowWithBarcodeDetector;
+    if (!barcodeWindow.BarcodeDetector) {
+      setScannerMessage("Scanner QR non supportato da questo browser. Usa il campo tessera manuale.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+
+      const detector = new barcodeWindow.BarcodeDetector({ formats: ["qr_code"] });
+      setScannerActive(true);
+      setScannerMessage("Inquadra il QR della tessera.");
+
+      const scan = async () => {
+        if (!videoRef.current || !streamRef.current) return;
+        try {
+          const codes = await detector.detect(videoRef.current);
+          const code = codes[0]?.rawValue;
+          if (code) {
+            selectFromQr(code);
+            stopScanner();
+            return;
+          }
+        } catch {
+          setScannerMessage("Lettura QR non riuscita. Riprova o inserisci la tessera manualmente.");
+        }
+        scannerFrameRef.current = window.requestAnimationFrame(scan);
+      };
+
+      scannerFrameRef.current = window.requestAnimationFrame(scan);
+    } catch {
+      setScannerMessage("Fotocamera non disponibile o permesso negato.");
+      stopScanner();
+    }
+  }
+
   return (
     <section>
       <SectionHeader
         title="Nuovo ingresso"
-        description="Cerca per nome, cognome, numero tessera o telefono, poi registra l'ingresso."
+        description="Leggi il QR della tessera, verifica la prenotazione e registra l'accesso effettivo."
       />
-      <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
+      <div className="grid gap-5 xl:grid-cols-[0.9fr_1fr_360px]">
+        <div className="rounded-md border-2 border-black bg-white p-4">
+          <h2 className="text-xl font-bold">Scanner QR tessera</h2>
+          <p className="mt-1 text-sm text-zinc-700">
+            Il QR deve contenere il numero tessera, anche in formato CPG:NUMERO.
+          </p>
+          <div className="mt-4 overflow-hidden rounded-md border-2 border-black bg-black">
+            <video
+              ref={videoRef}
+              muted
+              playsInline
+              className="aspect-video w-full bg-black object-cover"
+            />
+          </div>
+          <p className="mt-3 rounded-md border-2 border-black bg-yellow-100 p-3 text-sm font-semibold">
+            {scannerMessage}
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={scannerActive ? () => stopScanner() : startScanner}
+              className="h-12 rounded-md border-2 border-black bg-yellow-400 px-4 font-bold text-black hover:bg-yellow-300"
+            >
+              {scannerActive ? "Ferma scanner" : "Avvia scanner"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setManualQr("");
+                setScannerMessage("Inserisci o scansiona una tessera.");
+              }}
+              className="h-12 rounded-md border-2 border-black bg-white px-4 font-bold text-black hover:bg-yellow-100"
+            >
+              Pulisci
+            </button>
+          </div>
+          <label className="mt-4 block">
+            <span className="text-sm font-bold">Tessera manuale</span>
+            <div className="mt-1 grid gap-2 sm:grid-cols-[1fr_120px]">
+              <input
+                value={manualQr}
+                onChange={(event) => setManualQr(event.target.value)}
+                className="h-12 rounded-md border-2 border-black px-3"
+                placeholder="Numero tessera"
+              />
+              <button
+                type="button"
+                onClick={() => selectFromQr(manualQr)}
+                className="h-12 rounded-md border-2 border-black bg-black px-4 font-bold text-white"
+              >
+                Cerca
+              </button>
+            </div>
+          </label>
+        </div>
         <div className="rounded-md border-2 border-black bg-white p-4">
           <label className="text-sm font-bold text-black" htmlFor="entry-search">
             Cerca persona
@@ -677,10 +892,10 @@ function NewEntry({
               <button
                 type="button"
                 disabled={alreadyRegistered}
-                onClick={() => onRegister(selected)}
+                onClick={() => confirmAndRegister(selected)}
                 className="h-14 w-full rounded-md border-2 border-black bg-yellow-400 text-lg font-bold text-black hover:bg-yellow-300 disabled:cursor-not-allowed disabled:bg-zinc-300"
               >
-                Registra ingresso
+                {selectedEntry ? "Registra ingresso" : "Accetta senza prenotazione"}
               </button>
             </div>
           ) : (
