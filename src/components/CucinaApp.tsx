@@ -50,6 +50,38 @@ type WindowWithBarcodeDetector = Window &
     BarcodeDetector?: BarcodeDetectorConstructor;
   };
 
+function waitForVideoReady(video: HTMLVideoElement) {
+  if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return Promise.resolve();
+
+  return new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("video-timeout"));
+    }, 3000);
+
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      video.removeEventListener("loadedmetadata", onReady);
+      video.removeEventListener("canplay", onReady);
+      video.removeEventListener("error", onError);
+    };
+
+    const onReady = () => {
+      cleanup();
+      resolve();
+    };
+
+    const onError = () => {
+      cleanup();
+      reject(new Error("video-error"));
+    };
+
+    video.addEventListener("loadedmetadata", onReady);
+    video.addEventListener("canplay", onReady);
+    video.addEventListener("error", onError);
+  });
+}
+
 const sections: { id: SectionId; label: string; icon: string }[] = [
   { id: "dashboard", label: "Dashboard", icon: "⌂" },
   { id: "prenotazioni", label: "Prenotazioni", icon: "✓" },
@@ -671,6 +703,8 @@ function NewEntry({
   const videoRef = useRef<HTMLVideoElement>(null);
   const scannerFrameRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const scanInProgressRef = useRef(false);
+  const lastScanAtRef = useRef(0);
   const results = useMemo(
     () => sortUsers(users.filter((user) => user.active && matchesUser(user, query))).slice(0, 8),
     [query, users],
@@ -728,45 +762,81 @@ function NewEntry({
       window.cancelAnimationFrame(scannerFrameRef.current);
       scannerFrameRef.current = null;
     }
+    scanInProgressRef.current = false;
+    lastScanAtRef.current = 0;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
     if (updateState) setScannerActive(false);
   }
 
   async function startScanner() {
+    stopScanner(false);
+
     const barcodeWindow = window as WindowWithBarcodeDetector;
     if (!barcodeWindow.BarcodeDetector) {
       setScannerMessage("Scanner QR non supportato da questo browser. Usa il campo tessera manuale.");
       return;
     }
 
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setScannerMessage("Fotocamera non disponibile. Apri il gestionale da Chrome aggiornato e connessione HTTPS.");
+      return;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
+      setScannerMessage("Apertura fotocamera...");
+      const cameraConstraints: MediaStreamConstraints = {
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30, max: 30 },
+        },
         audio: false,
-      });
+      };
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(cameraConstraints);
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute("playsinline", "true");
         await videoRef.current.play();
+        await waitForVideoReady(videoRef.current);
       }
 
       const detector = new barcodeWindow.BarcodeDetector({ formats: ["qr_code"] });
       setScannerActive(true);
-      setScannerMessage("Inquadra il QR della tessera.");
+      setScannerMessage("Inquadra il QR al centro, con buona luce e tessera ferma.");
 
-      const scan = async () => {
+      const scan = async (timestamp: number) => {
         if (!videoRef.current || !streamRef.current) return;
-        try {
-          const codes = await detector.detect(videoRef.current);
-          const code = codes[0]?.rawValue;
-          if (code) {
-            selectFromQr(code);
-            stopScanner();
-            return;
+
+        if (videoRef.current.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+          scannerFrameRef.current = window.requestAnimationFrame(scan);
+          return;
+        }
+
+        if (!scanInProgressRef.current && timestamp - lastScanAtRef.current > 120) {
+          scanInProgressRef.current = true;
+          lastScanAtRef.current = timestamp;
+          try {
+            const codes = await detector.detect(videoRef.current);
+            const code = codes[0]?.rawValue;
+            if (code) {
+              selectFromQr(code);
+              stopScanner();
+              return;
+            }
+          } catch {
+            setScannerMessage("Lettura QR non riuscita. Avvicina la tessera o usa il campo manuale.");
+          } finally {
+            scanInProgressRef.current = false;
           }
-        } catch {
-          setScannerMessage("Lettura QR non riuscita. Riprova o inserisci la tessera manualmente.");
         }
         scannerFrameRef.current = window.requestAnimationFrame(scan);
       };
