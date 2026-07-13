@@ -2,6 +2,7 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { authClient } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 
 export type LoginState = {
@@ -34,7 +35,8 @@ export async function loginAction(
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({
+  const auth = authClient(supabase);
+  const { error } = await auth.signInWithPassword({
     email,
     password,
   });
@@ -46,7 +48,7 @@ export async function loginAction(
   const {
     data: { user },
     error: userError,
-  } = await supabase.auth.getUser();
+  } = await auth.getUser();
 
   if (userError || !user) {
     return { error: "Sessione non disponibile. Riprova." };
@@ -59,12 +61,12 @@ export async function loginAction(
     .maybeSingle();
 
   if (profileError) {
-    await supabase.auth.signOut();
+    await auth.signOut();
     return { error: "Supabase non raggiungibile. Riprova tra poco." };
   }
 
   if (profile && profile.attivo === false) {
-    await supabase.auth.signOut();
+    await auth.signOut();
     return { error: "Utente non attivo. Contatta un amministratore." };
   }
 

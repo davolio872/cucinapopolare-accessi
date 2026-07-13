@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
-import type { User } from "@supabase/supabase-js";
+import { authClient, type AuthUser } from "@/lib/supabase/auth";
 import { supabasePublishableKey, supabaseUrl } from "@/lib/supabase/config";
 
 export type VolunteerProfile = {
@@ -56,13 +56,8 @@ export async function getAuthenticatedUser() {
   }
 
   const supabase = await createClient();
-  const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
-
-  if (claimsError || !claimsData?.claims) {
-    return { user: null, profile: null };
-  }
-
-  const { data: userData, error: userError } = await supabase.auth.getUser();
+  const auth = authClient(supabase);
+  const { data: userData, error: userError } = await auth.getUser();
   if (userError || !userData.user) {
     return { user: null, profile: null };
   }
@@ -77,7 +72,7 @@ export async function getAuthenticatedUser() {
 
 async function getProfileForUser(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  user: User,
+  user: AuthUser,
 ) {
   const { data, error } = await supabase
     .from("profiles")
