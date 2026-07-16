@@ -230,7 +230,7 @@ type CsvValue = string | number | boolean | null | undefined;
 const qrSize = 21;
 const qrDataCodewords = 19;
 const qrEcCodewords = 7;
-const qrReserved = 2;
+const qrReserved = 4;
 const qrAlphanumericChars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
 const bookingPhoneNumber = "351 484 7182";
 
@@ -1476,7 +1476,7 @@ function NewEntry({
       const canvas = qrCanvasRef.current ?? document.createElement("canvas");
       qrCanvasRef.current = canvas;
       setScannerActive(true);
-      setScannerMessage("Inquadra il QR al centro, con buona luce e tessera ferma.");
+      setScannerMessage("Inquadra il QR al centro. Da schermo PC aumenta la luminosita ed evita riflessi.");
 
       const scan = async (timestamp: number) => {
         if (!videoRef.current || !streamRef.current) return;
