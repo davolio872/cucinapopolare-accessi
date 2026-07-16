@@ -3,6 +3,7 @@
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import jsQR from "jsqr";
+import QRCode from "qrcode";
 import { createDemoState } from "@/data/demo-data";
 import {
   deleteOperationalUser,
@@ -227,12 +228,15 @@ function percent(part: number, total: number) {
 
 type CsvValue = string | number | boolean | null | undefined;
 
-const qrSize = 21;
-const qrDataCodewords = 19;
-const qrEcCodewords = 7;
-const qrReserved = 4;
-const qrAlphanumericChars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
 const bookingPhoneNumber = "351 484 7182";
+const qrRenderOptions = {
+  errorCorrectionLevel: "M" as const,
+  margin: 4,
+  color: {
+    dark: "#000000",
+    light: "#ffffff",
+  },
+};
 
 function downloadTextFile(fileName: string, content: string, type = "text/plain;charset=utf-8") {
   const blob = new Blob([content], { type });
@@ -276,38 +280,25 @@ function qrFileBase(user: User) {
   return `tessera-${name || user.cardNumber}`;
 }
 
-function downloadQrSvg(user: User) {
-  downloadTextFile(
-    `${qrFileBase(user)}.svg`,
-    qrSvgMarkup(qrPayload(user), {
-      title: `${user.cardNumber} - ${user.firstName} ${user.lastName}`,
-      size: 320,
-    }),
-    "image/svg+xml;charset=utf-8",
-  );
+async function renderQrToCanvas(canvas: HTMLCanvasElement, value: string, width: number) {
+  await QRCode.toCanvas(canvas, value, {
+    ...qrRenderOptions,
+    width,
+  });
 }
 
-function downloadQrPng(user: User) {
-  const canvas = document.createElement("canvas");
-  const size = 900;
-  const margin = 72;
-  const matrix = createQrMatrix(qrPayload(user));
-  const moduleSize = Math.floor((size - margin * 2) / matrix.length);
-  const imageSize = moduleSize * matrix.length;
-  const offset = Math.floor((size - imageSize) / 2);
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext("2d");
-  if (!context) return;
-
-  context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, size, size);
-  context.fillStyle = "#000000";
-  matrix.forEach((row, y) => {
-    row.forEach((filled, x) => {
-      if (filled) context.fillRect(offset + x * moduleSize, offset + y * moduleSize, moduleSize, moduleSize);
-    });
+async function downloadQrSvg(user: User) {
+  const svg = await QRCode.toString(qrPayload(user), {
+    ...qrRenderOptions,
+    type: "svg",
+    width: 320,
   });
+  downloadTextFile(`${qrFileBase(user)}.svg`, svg, "image/svg+xml;charset=utf-8");
+}
+
+async function downloadQrPng(user: User) {
+  const canvas = document.createElement("canvas");
+  await renderQrToCanvas(canvas, qrPayload(user), 900);
 
   const link = document.createElement("a");
   link.download = `${qrFileBase(user)}.png`;
@@ -326,33 +317,16 @@ function loadCanvasImage(src: string) {
   });
 }
 
-function drawQrOnCanvas(
+async function drawQrOnCanvas(
   context: CanvasRenderingContext2D,
   user: User,
   x: number,
   y: number,
   size: number,
 ) {
-  const matrix = createQrMatrix(qrPayload(user));
-  const moduleSize = Math.floor(size / matrix.length);
-  const qrImageSize = moduleSize * matrix.length;
-  const offset = Math.floor((size - qrImageSize) / 2);
-
-  context.fillStyle = "#ffffff";
-  context.fillRect(x, y, size, size);
-  context.fillStyle = "#000000";
-  matrix.forEach((row, rowIndex) => {
-    row.forEach((filled, columnIndex) => {
-      if (filled) {
-        context.fillRect(
-          x + offset + columnIndex * moduleSize,
-          y + offset + rowIndex * moduleSize,
-          moduleSize,
-          moduleSize,
-        );
-      }
-    });
-  });
+  const qrCanvas = document.createElement("canvas");
+  await renderQrToCanvas(qrCanvas, qrPayload(user), size);
+  context.drawImage(qrCanvas, x, y, size, size);
 }
 
 function fitCanvasText(
@@ -411,7 +385,7 @@ async function createBadgeJpgDataUrl(user: User) {
   context.font = "700 34px Arial, sans-serif";
   context.fillText("GENOVESE", 220, 98);
 
-  drawQrOnCanvas(context, user, 62, 202, 356);
+  await drawQrOnCanvas(context, user, 62, 202, 356);
   context.strokeStyle = "#000000";
   context.lineWidth = 8;
   context.strokeRect(62, 202, 356, 356);
@@ -582,235 +556,22 @@ async function downloadBadgeZip(users: User[]) {
   URL.revokeObjectURL(url);
 }
 
-function qrSvgMarkup(value: string, options: { title?: string; size?: number } = {}) {
-  const matrix = createQrMatrix(value);
-  const size = options.size ?? 96;
-  const moduleSize = size / matrix.length;
-  const rects = matrix.flatMap((row, y) =>
-    row.map((filled, x) =>
-      filled
-        ? `<rect x="${roundSvg(x * moduleSize)}" y="${roundSvg(y * moduleSize)}" width="${roundSvg(moduleSize)}" height="${roundSvg(moduleSize)}"/>`
-        : "",
-    ),
-  ).join("");
-  const title = options.title ? `<title>${escapeXmlText(options.title)}</title>` : "";
+function QrPreview({ value, label, size = 72 }: { value: string; label: string; size?: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img">${title}<rect width="100%" height="100%" fill="#fff"/><g fill="#000">${rects}</g></svg>`;
-}
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    void renderQrToCanvas(canvasRef.current, value, size);
+  }, [size, value]);
 
-function QrPreview({ value, label }: { value: string; label: string }) {
   return (
     <div
-      className="h-20 w-20 rounded-md border-2 border-black bg-white p-1"
-      dangerouslySetInnerHTML={{ __html: qrSvgMarkup(value, { title: label, size: 72 }) }}
-    />
+      className="grid max-w-full place-items-center rounded-md border-2 border-black bg-white p-1"
+      style={{ width: size + 8, height: size + 8 }}
+    >
+      <canvas ref={canvasRef} width={size} height={size} aria-label={label} className="h-full w-full" />
+    </div>
   );
-}
-
-function createQrMatrix(value: string) {
-  const data = createQrCodewords(value);
-  const modules = Array.from({ length: qrSize }, () => Array(qrSize).fill(false) as boolean[]);
-  const reserved = Array.from({ length: qrSize }, () => Array(qrSize).fill(false) as boolean[]);
-
-  placeFinder(modules, reserved, 0, 0);
-  placeFinder(modules, reserved, qrSize - 7, 0);
-  placeFinder(modules, reserved, 0, qrSize - 7);
-  placeTiming(modules, reserved);
-  reserveFormatAreas(reserved);
-  modules[13][8] = true;
-  reserved[13][8] = true;
-
-  const bits = data.flatMap((byte) => Array.from({ length: 8 }, (_, index) => ((byte >> (7 - index)) & 1) === 1));
-  let bitIndex = 0;
-  let upward = true;
-
-  for (let right = qrSize - 1; right > 0; right -= 2) {
-    if (right === 6) right -= 1;
-    for (let step = 0; step < qrSize; step += 1) {
-      const y = upward ? qrSize - 1 - step : step;
-      for (let column = 0; column < 2; column += 1) {
-        const x = right - column;
-        if (reserved[y][x]) continue;
-        const bit = bitIndex < bits.length ? bits[bitIndex] : false;
-        modules[y][x] = bit !== qrMask(0, x, y);
-        bitIndex += 1;
-      }
-    }
-    upward = !upward;
-  }
-
-  placeFormatBits(modules, reserved, 0);
-  return addQuietZone(modules);
-}
-
-function createQrCodewords(value: string) {
-  const normalized = value.toUpperCase();
-  const bits: boolean[] = [];
-  appendBits(bits, 0b0010, 4);
-  appendBits(bits, normalized.length, 9);
-
-  for (let index = 0; index < normalized.length; index += 2) {
-    const first = qrAlphanumericChars.indexOf(normalized[index]);
-    const second = qrAlphanumericChars.indexOf(normalized[index + 1] ?? "");
-    if (first < 0) throw new Error("unsupported-qr-character");
-    if (second >= 0) appendBits(bits, first * 45 + second, 11);
-    else appendBits(bits, first, 6);
-  }
-
-  appendBits(bits, 0, Math.min(4, qrDataCodewords * 8 - bits.length));
-  while (bits.length % 8) bits.push(false);
-
-  const data: number[] = [];
-  for (let index = 0; index < bits.length; index += 8) {
-    data.push(bits.slice(index, index + 8).reduce((byte, bit) => (byte << 1) | (bit ? 1 : 0), 0));
-  }
-
-  for (let pad = 0xec; data.length < qrDataCodewords; pad = pad === 0xec ? 0x11 : 0xec) {
-    data.push(pad);
-  }
-
-  return [...data, ...reedSolomonRemainder(data, qrEcCodewords)];
-}
-
-function appendBits(bits: boolean[], value: number, length: number) {
-  for (let index = length - 1; index >= 0; index -= 1) {
-    bits.push(((value >> index) & 1) === 1);
-  }
-}
-
-function reedSolomonRemainder(data: number[], degree: number) {
-  const generator = reedSolomonGenerator(degree);
-  const result = Array(degree).fill(0);
-
-  for (const byte of data) {
-    const factor = byte ^ result.shift()!;
-    result.push(0);
-    generator.forEach((coefficient, index) => {
-      result[index] ^= gfMultiply(coefficient, factor);
-    });
-  }
-
-  return result;
-}
-
-function reedSolomonGenerator(degree: number) {
-  let result = [1];
-  for (let index = 0; index < degree; index += 1) {
-    const next = Array(result.length + 1).fill(0);
-    result.forEach((coefficient, coefficientIndex) => {
-      next[coefficientIndex] ^= gfMultiply(coefficient, 1);
-      next[coefficientIndex + 1] ^= gfMultiply(coefficient, gfPow(2, index));
-    });
-    result = next;
-  }
-  return result.slice(1);
-}
-
-function gfPow(value: number, power: number) {
-  let result = 1;
-  for (let index = 0; index < power; index += 1) result = gfMultiply(result, value);
-  return result;
-}
-
-function gfMultiply(left: number, right: number) {
-  let result = 0;
-  for (; right > 0; right >>= 1) {
-    if (right & 1) result ^= left;
-    left <<= 1;
-    if (left & 0x100) left ^= 0x11d;
-  }
-  return result;
-}
-
-function placeFinder(modules: boolean[][], reserved: boolean[][], x: number, y: number) {
-  for (let dy = -1; dy <= 7; dy += 1) {
-    for (let dx = -1; dx <= 7; dx += 1) {
-      const xx = x + dx;
-      const yy = y + dy;
-      if (xx < 0 || yy < 0 || xx >= qrSize || yy >= qrSize) continue;
-      const inFinder = dx >= 0 && dx <= 6 && dy >= 0 && dy <= 6;
-      modules[yy][xx] = inFinder && (dx === 0 || dx === 6 || dy === 0 || dy === 6 || (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4));
-      reserved[yy][xx] = true;
-    }
-  }
-}
-
-function placeTiming(modules: boolean[][], reserved: boolean[][]) {
-  for (let index = 8; index < qrSize - 8; index += 1) {
-    modules[6][index] = index % 2 === 0;
-    modules[index][6] = index % 2 === 0;
-    reserved[6][index] = true;
-    reserved[index][6] = true;
-  }
-}
-
-function reserveFormatAreas(reserved: boolean[][]) {
-  for (let index = 0; index < 9; index += 1) {
-    if (index !== 6) {
-      reserved[8][index] = true;
-      reserved[index][8] = true;
-    }
-    reserved[8][qrSize - 1 - index] = true;
-    reserved[qrSize - 1 - index][8] = true;
-  }
-}
-
-function placeFormatBits(modules: boolean[][], reserved: boolean[][], mask: number) {
-  const bits = formatBits(mask);
-  const first = [
-    [8, 0], [8, 1], [8, 2], [8, 3], [8, 4], [8, 5], [8, 7], [8, 8],
-    [7, 8], [5, 8], [4, 8], [3, 8], [2, 8], [1, 8], [0, 8],
-  ];
-  const second = [
-    [qrSize - 1, 8], [qrSize - 2, 8], [qrSize - 3, 8], [qrSize - 4, 8], [qrSize - 5, 8], [qrSize - 6, 8], [qrSize - 7, 8],
-    [8, qrSize - 8], [8, qrSize - 7], [8, qrSize - 6], [8, qrSize - 5], [8, qrSize - 4], [8, qrSize - 3], [8, qrSize - 2], [8, qrSize - 1],
-  ];
-
-  first.forEach(([x, y], index) => {
-    modules[y][x] = bits[index];
-    reserved[y][x] = true;
-  });
-  second.forEach(([x, y], index) => {
-    modules[y][x] = bits[index];
-    reserved[y][x] = true;
-  });
-}
-
-function formatBits(mask: number) {
-  const data = (0b01 << 3) | mask;
-  let value = data << 10;
-  const generator = 0b10100110111;
-  for (let bit = 14; bit >= 10; bit -= 1) {
-    if ((value >> bit) & 1) value ^= generator << (bit - 10);
-  }
-  const format = ((data << 10) | value) ^ 0b101010000010010;
-  return Array.from({ length: 15 }, (_, index) => ((format >> index) & 1) === 1);
-}
-
-function qrMask(mask: number, x: number, y: number) {
-  if (mask === 0) return (x + y) % 2 === 0;
-  return false;
-}
-
-function addQuietZone(modules: boolean[][]) {
-  const size = modules.length + qrReserved * 2;
-  const quiet = Array.from({ length: size }, () => Array(size).fill(false) as boolean[]);
-  modules.forEach((row, y) => row.forEach((filled, x) => {
-    quiet[y + qrReserved][x + qrReserved] = filled;
-  }));
-  return quiet;
-}
-
-function roundSvg(value: number) {
-  return Number(value.toFixed(3));
-}
-
-function escapeXmlText(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 export function CucinaApp({
@@ -2361,19 +2122,16 @@ function QrModal({ user, onClose }: { user: User; onClose: () => void }) {
           </button>
         </div>
         <div className="grid place-items-center rounded-md border-2 border-black bg-white p-5">
-          <div
-            className="h-80 w-80 max-w-full"
-            dangerouslySetInnerHTML={{ __html: qrSvgMarkup(payload, { title: `${user.cardNumber} - ${user.firstName} ${user.lastName}`, size: 320 }) }}
-          />
+          <QrPreview value={payload} label={`QR tessera ${user.cardNumber}`} size={320} />
         </div>
         <p className="mt-3 rounded-md border-2 border-black bg-yellow-100 p-3 text-sm font-semibold">
           Contenuto QR: {payload}
         </p>
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          <button type="button" onClick={() => downloadQrSvg(user)} className="h-12 rounded-md border-2 border-black bg-yellow-400 px-4 font-bold text-black hover:bg-yellow-300">
+          <button type="button" onClick={() => void downloadQrSvg(user)} className="h-12 rounded-md border-2 border-black bg-yellow-400 px-4 font-bold text-black hover:bg-yellow-300">
             Scarica SVG
           </button>
-          <button type="button" onClick={() => downloadQrPng(user)} className="h-12 rounded-md border-2 border-black bg-black px-4 font-bold text-white hover:bg-zinc-800">
+          <button type="button" onClick={() => void downloadQrPng(user)} className="h-12 rounded-md border-2 border-black bg-black px-4 font-bold text-white hover:bg-zinc-800">
             Scarica PNG
           </button>
         </div>
