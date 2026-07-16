@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getBookingWindowStatus, todayKey } from "@/lib/dates";
 import { supabasePublishableKey, supabaseUrl } from "@/lib/supabase/config";
 
 type BookingResult = {
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
     p_secret: webhookSecret,
     p_phone_e164: from,
     p_channel: channel,
-    p_entry_date: new Date().toISOString().slice(0, 10),
+    p_entry_date: getBookingWindowStatus().entryDate ?? todayKey(),
     p_body: body,
     p_provider_message_id: providerMessageId,
   });

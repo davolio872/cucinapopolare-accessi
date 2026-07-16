@@ -11,7 +11,7 @@ import {
   upsertOperationalUser,
   upsertOperationalUsers,
 } from "@/lib/cpg-data";
-import { currentTime, formatItalianDate, todayKey } from "@/lib/dates";
+import { currentTime, formatItalianDate, getBookingWindowStatus, todayKey } from "@/lib/dates";
 import { applyImport, downloadTemplate, parseImportFile } from "@/lib/excel";
 import { createClient } from "@/lib/supabase/client";
 import type { AuthenticatedVolunteer } from "@/lib/supabase/server";
@@ -218,6 +218,328 @@ function percent(part: number, total: number) {
   return Math.round((part / total) * 100);
 }
 
+type CsvValue = string | number | boolean | null | undefined;
+
+const qrSize = 21;
+const qrDataCodewords = 19;
+const qrEcCodewords = 7;
+const qrReserved = 2;
+const qrAlphanumericChars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
+
+function downloadTextFile(fileName: string, content: string, type = "text/plain;charset=utf-8") {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(value: CsvValue) {
+  const text = String(value ?? "");
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function buildCsv(headers: string[], rows: CsvValue[][]) {
+  return [
+    headers.map(csvCell).join(";"),
+    ...rows.map((row) => row.map(csvCell).join(";")),
+  ].join("\r\n");
+}
+
+function reportFileName(name: string, extension: "csv" | "json") {
+  return `cucina-popolare-${name}-${today}.${extension}`;
+}
+
+function qrPayload(user: User) {
+  return `CPG:${user.cardNumber}`;
+}
+
+function qrFileBase(user: User) {
+  const name = `${user.cardNumber}-${user.lastName}-${user.firstName}`
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `tessera-${name || user.cardNumber}`;
+}
+
+function downloadQrSvg(user: User) {
+  downloadTextFile(
+    `${qrFileBase(user)}.svg`,
+    qrSvgMarkup(qrPayload(user), {
+      title: `${user.cardNumber} - ${user.firstName} ${user.lastName}`,
+      size: 320,
+    }),
+    "image/svg+xml;charset=utf-8",
+  );
+}
+
+function downloadQrPng(user: User) {
+  const canvas = document.createElement("canvas");
+  const size = 900;
+  const margin = 72;
+  const matrix = createQrMatrix(qrPayload(user));
+  const moduleSize = Math.floor((size - margin * 2) / matrix.length);
+  const imageSize = moduleSize * matrix.length;
+  const offset = Math.floor((size - imageSize) / 2);
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d");
+  if (!context) return;
+
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, size, size);
+  context.fillStyle = "#000000";
+  matrix.forEach((row, y) => {
+    row.forEach((filled, x) => {
+      if (filled) context.fillRect(offset + x * moduleSize, offset + y * moduleSize, moduleSize, moduleSize);
+    });
+  });
+
+  const link = document.createElement("a");
+  link.download = `${qrFileBase(user)}.png`;
+  link.href = canvas.toDataURL("image/png");
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function qrSvgMarkup(value: string, options: { title?: string; size?: number } = {}) {
+  const matrix = createQrMatrix(value);
+  const size = options.size ?? 96;
+  const moduleSize = size / matrix.length;
+  const rects = matrix.flatMap((row, y) =>
+    row.map((filled, x) =>
+      filled
+        ? `<rect x="${roundSvg(x * moduleSize)}" y="${roundSvg(y * moduleSize)}" width="${roundSvg(moduleSize)}" height="${roundSvg(moduleSize)}"/>`
+        : "",
+    ),
+  ).join("");
+  const title = options.title ? `<title>${escapeXmlText(options.title)}</title>` : "";
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img">${title}<rect width="100%" height="100%" fill="#fff"/><g fill="#000">${rects}</g></svg>`;
+}
+
+function QrPreview({ value, label }: { value: string; label: string }) {
+  return (
+    <div
+      className="h-20 w-20 rounded-md border-2 border-black bg-white p-1"
+      dangerouslySetInnerHTML={{ __html: qrSvgMarkup(value, { title: label, size: 72 }) }}
+    />
+  );
+}
+
+function createQrMatrix(value: string) {
+  const data = createQrCodewords(value);
+  const modules = Array.from({ length: qrSize }, () => Array(qrSize).fill(false) as boolean[]);
+  const reserved = Array.from({ length: qrSize }, () => Array(qrSize).fill(false) as boolean[]);
+
+  placeFinder(modules, reserved, 0, 0);
+  placeFinder(modules, reserved, qrSize - 7, 0);
+  placeFinder(modules, reserved, 0, qrSize - 7);
+  placeTiming(modules, reserved);
+  reserveFormatAreas(reserved);
+  modules[13][8] = true;
+  reserved[13][8] = true;
+
+  const bits = data.flatMap((byte) => Array.from({ length: 8 }, (_, index) => ((byte >> (7 - index)) & 1) === 1));
+  let bitIndex = 0;
+  let upward = true;
+
+  for (let right = qrSize - 1; right > 0; right -= 2) {
+    if (right === 6) right -= 1;
+    for (let step = 0; step < qrSize; step += 1) {
+      const y = upward ? qrSize - 1 - step : step;
+      for (let column = 0; column < 2; column += 1) {
+        const x = right - column;
+        if (reserved[y][x]) continue;
+        const bit = bitIndex < bits.length ? bits[bitIndex] : false;
+        modules[y][x] = bit !== qrMask(0, x, y);
+        bitIndex += 1;
+      }
+    }
+    upward = !upward;
+  }
+
+  placeFormatBits(modules, reserved, 0);
+  return addQuietZone(modules);
+}
+
+function createQrCodewords(value: string) {
+  const normalized = value.toUpperCase();
+  const bits: boolean[] = [];
+  appendBits(bits, 0b0010, 4);
+  appendBits(bits, normalized.length, 9);
+
+  for (let index = 0; index < normalized.length; index += 2) {
+    const first = qrAlphanumericChars.indexOf(normalized[index]);
+    const second = qrAlphanumericChars.indexOf(normalized[index + 1] ?? "");
+    if (first < 0) throw new Error("unsupported-qr-character");
+    if (second >= 0) appendBits(bits, first * 45 + second, 11);
+    else appendBits(bits, first, 6);
+  }
+
+  appendBits(bits, 0, Math.min(4, qrDataCodewords * 8 - bits.length));
+  while (bits.length % 8) bits.push(false);
+
+  const data: number[] = [];
+  for (let index = 0; index < bits.length; index += 8) {
+    data.push(bits.slice(index, index + 8).reduce((byte, bit) => (byte << 1) | (bit ? 1 : 0), 0));
+  }
+
+  for (let pad = 0xec; data.length < qrDataCodewords; pad = pad === 0xec ? 0x11 : 0xec) {
+    data.push(pad);
+  }
+
+  return [...data, ...reedSolomonRemainder(data, qrEcCodewords)];
+}
+
+function appendBits(bits: boolean[], value: number, length: number) {
+  for (let index = length - 1; index >= 0; index -= 1) {
+    bits.push(((value >> index) & 1) === 1);
+  }
+}
+
+function reedSolomonRemainder(data: number[], degree: number) {
+  const generator = reedSolomonGenerator(degree);
+  const result = Array(degree).fill(0);
+
+  for (const byte of data) {
+    const factor = byte ^ result.shift()!;
+    result.push(0);
+    generator.forEach((coefficient, index) => {
+      result[index] ^= gfMultiply(coefficient, factor);
+    });
+  }
+
+  return result;
+}
+
+function reedSolomonGenerator(degree: number) {
+  let result = [1];
+  for (let index = 0; index < degree; index += 1) {
+    const next = Array(result.length + 1).fill(0);
+    result.forEach((coefficient, coefficientIndex) => {
+      next[coefficientIndex] ^= gfMultiply(coefficient, 1);
+      next[coefficientIndex + 1] ^= gfMultiply(coefficient, gfPow(2, index));
+    });
+    result = next;
+  }
+  return result.slice(1);
+}
+
+function gfPow(value: number, power: number) {
+  let result = 1;
+  for (let index = 0; index < power; index += 1) result = gfMultiply(result, value);
+  return result;
+}
+
+function gfMultiply(left: number, right: number) {
+  let result = 0;
+  for (; right > 0; right >>= 1) {
+    if (right & 1) result ^= left;
+    left <<= 1;
+    if (left & 0x100) left ^= 0x11d;
+  }
+  return result;
+}
+
+function placeFinder(modules: boolean[][], reserved: boolean[][], x: number, y: number) {
+  for (let dy = -1; dy <= 7; dy += 1) {
+    for (let dx = -1; dx <= 7; dx += 1) {
+      const xx = x + dx;
+      const yy = y + dy;
+      if (xx < 0 || yy < 0 || xx >= qrSize || yy >= qrSize) continue;
+      const inFinder = dx >= 0 && dx <= 6 && dy >= 0 && dy <= 6;
+      modules[yy][xx] = inFinder && (dx === 0 || dx === 6 || dy === 0 || dy === 6 || (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4));
+      reserved[yy][xx] = true;
+    }
+  }
+}
+
+function placeTiming(modules: boolean[][], reserved: boolean[][]) {
+  for (let index = 8; index < qrSize - 8; index += 1) {
+    modules[6][index] = index % 2 === 0;
+    modules[index][6] = index % 2 === 0;
+    reserved[6][index] = true;
+    reserved[index][6] = true;
+  }
+}
+
+function reserveFormatAreas(reserved: boolean[][]) {
+  for (let index = 0; index < 9; index += 1) {
+    if (index !== 6) {
+      reserved[8][index] = true;
+      reserved[index][8] = true;
+    }
+    reserved[8][qrSize - 1 - index] = true;
+    reserved[qrSize - 1 - index][8] = true;
+  }
+}
+
+function placeFormatBits(modules: boolean[][], reserved: boolean[][], mask: number) {
+  const bits = formatBits(mask);
+  const first = [
+    [8, 0], [8, 1], [8, 2], [8, 3], [8, 4], [8, 5], [8, 7], [8, 8],
+    [7, 8], [5, 8], [4, 8], [3, 8], [2, 8], [1, 8], [0, 8],
+  ];
+  const second = [
+    [qrSize - 1, 8], [qrSize - 2, 8], [qrSize - 3, 8], [qrSize - 4, 8], [qrSize - 5, 8], [qrSize - 6, 8], [qrSize - 7, 8],
+    [8, qrSize - 8], [8, qrSize - 7], [8, qrSize - 6], [8, qrSize - 5], [8, qrSize - 4], [8, qrSize - 3], [8, qrSize - 2], [8, qrSize - 1],
+  ];
+
+  first.forEach(([x, y], index) => {
+    modules[y][x] = bits[index];
+    reserved[y][x] = true;
+  });
+  second.forEach(([x, y], index) => {
+    modules[y][x] = bits[index];
+    reserved[y][x] = true;
+  });
+}
+
+function formatBits(mask: number) {
+  let data = (0b01 << 3) | mask;
+  let value = data << 10;
+  const generator = 0b10100110111;
+  for (let bit = 14; bit >= 10; bit -= 1) {
+    if ((value >> bit) & 1) value ^= generator << (bit - 10);
+  }
+  const format = ((data << 10) | value) ^ 0b101010000010010;
+  return Array.from({ length: 15 }, (_, index) => ((format >> index) & 1) === 1);
+}
+
+function qrMask(mask: number, x: number, y: number) {
+  if (mask === 0) return (x + y) % 2 === 0;
+  return false;
+}
+
+function addQuietZone(modules: boolean[][]) {
+  const size = modules.length + qrReserved * 2;
+  const quiet = Array.from({ length: size }, () => Array(size).fill(false) as boolean[]);
+  modules.forEach((row, y) => row.forEach((filled, x) => {
+    quiet[y + qrReserved][x + qrReserved] = filled;
+  }));
+  return quiet;
+}
+
+function roundSvg(value: number) {
+  return Number(value.toFixed(3));
+}
+
+function escapeXmlText(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 export function CucinaApp({
   volunteer,
   initialState,
@@ -361,6 +683,17 @@ export function CucinaApp({
   }
 
   function bookUser(user: User) {
+    const bookingWindow = getBookingWindowStatus();
+    if (!bookingWindow.isOpen) {
+      showNotice(bookingWindow.message);
+      return;
+    }
+
+    if (bookingWindow.entryDate !== today) {
+      showNotice("Dal gestionale questa schermata prenota solo per oggi. Usa il calendario per il giorno successivo.");
+      return;
+    }
+
     if (!user.active) {
       showNotice("Utente non attivo: prenotazione non consentita.");
       return;
@@ -1159,6 +1492,17 @@ function Statistics({ users, entries }: { users: User[]; entries: DailyEntry[] }
   const activeUsers = users.filter((user) => user.active).length;
   const dates = Array.from(new Set(entries.map((entry) => entry.date))).sort();
   const recentDates = dates.slice(-14);
+  const dailyRows = dates.map((date) => {
+    const dayEntries = entries.filter((entry) => entry.date === date);
+    return {
+      date,
+      booked: countStatus(dayEntries, "Prenotato"),
+      present: countStatus(dayEntries, "Presente"),
+      absent: countStatus(dayEntries, "Assente"),
+      walkIns: countStatus(dayEntries, "Senza prenotazione"),
+      total: dayEntries.length,
+    };
+  });
   const topUsers = users
     .map((user) => ({
       user,
@@ -1167,6 +1511,113 @@ function Statistics({ users, entries }: { users: User[]; entries: DailyEntry[] }
     .filter((row) => row.entries.length > 0)
     .sort((a, b) => b.entries.length - a.entries.length)
     .slice(0, 8);
+  const userHistoryRows = users
+    .map((user) => {
+      const userEntries = entries.filter((entry) => entry.userId === user.id);
+      return {
+        user,
+        total: userEntries.length,
+        booked: countStatus(userEntries, "Prenotato"),
+        present: countStatus(userEntries, "Presente"),
+        absent: countStatus(userEntries, "Assente"),
+        walkIns: countStatus(userEntries, "Senza prenotazione"),
+      };
+    })
+    .filter((row) => row.total > 0)
+    .sort((a, b) => b.total - a.total || a.user.cardNumber.localeCompare(b.user.cardNumber, "it"));
+
+  function exportSummaryCsv() {
+    downloadTextFile(
+      reportFileName("riepilogo-statistiche", "csv"),
+      buildCsv(
+        ["Voce", "Valore"],
+        [
+          ["Utenti totali", users.length],
+          ["Utenti attivi", activeUsers],
+          ["Movimenti totali", entries.length],
+          ["Prenotazioni aperte", countStatus(entries, "Prenotato")],
+          ["Presenze", present],
+          ["Assenze", absent],
+          ["Ingressi senza prenotazione", walkIns],
+          ["Tasso presenza", `${percent(present, bookedLike.length + absent)}%`],
+          ...channels.map((channel) => [`Canale ${channel.label}`, channel.value]),
+        ],
+      ),
+      "text/csv;charset=utf-8",
+    );
+  }
+
+  function exportDailyCsv() {
+    downloadTextFile(
+      reportFileName("andamento-giornaliero", "csv"),
+      buildCsv(
+        ["Data", "Prenotati", "Presenti", "Assenti", "Senza prenotazione", "Totale movimenti"],
+        dailyRows.map((row) => [
+          row.date,
+          row.booked,
+          row.present,
+          row.absent,
+          row.walkIns,
+          row.total,
+        ]),
+      ),
+      "text/csv;charset=utf-8",
+    );
+  }
+
+  function exportUsersCsv() {
+    downloadTextFile(
+      reportFileName("storico-persone", "csv"),
+      buildCsv(
+        ["Tessera", "Nome", "Cognome", "Telefono", "Movimenti", "Prenotazioni", "Presenze", "Assenze", "Senza prenotazione"],
+        userHistoryRows.map((row) => [
+          row.user.cardNumber,
+          row.user.firstName,
+          row.user.lastName,
+          row.user.phone,
+          row.total,
+          row.booked,
+          row.present,
+          row.absent,
+          row.walkIns,
+        ]),
+      ),
+      "text/csv;charset=utf-8",
+    );
+  }
+
+  function exportJsonReport() {
+    downloadTextFile(
+      reportFileName("report-completo", "json"),
+      JSON.stringify({
+        generatedAt: new Date().toISOString(),
+        summary: {
+          users: users.length,
+          activeUsers,
+          entries: entries.length,
+          booked: countStatus(entries, "Prenotato"),
+          present,
+          absent,
+          walkIns,
+          presenceRate: percent(present, bookedLike.length + absent),
+        },
+        channels,
+        dailyRows,
+        userHistoryRows: userHistoryRows.map((row) => ({
+          cardNumber: row.user.cardNumber,
+          firstName: row.user.firstName,
+          lastName: row.user.lastName,
+          phone: row.user.phone,
+          total: row.total,
+          booked: row.booked,
+          present: row.present,
+          absent: row.absent,
+          walkIns: row.walkIns,
+        })),
+      }, null, 2),
+      "application/json;charset=utf-8",
+    );
+  }
 
   return (
     <section>
@@ -1174,6 +1625,20 @@ function Statistics({ users, entries }: { users: User[]; entries: DailyEntry[] }
         title="Statistiche"
         description="Leggi andamento, presenze, assenze e canali di prenotazione sullo storico disponibile."
       />
+      <div className="mb-5 flex flex-wrap gap-2">
+        <button type="button" onClick={exportSummaryCsv} className="rounded-md border-2 border-black bg-yellow-400 px-4 py-2 text-sm font-bold hover:bg-yellow-300">
+          Esporta riepilogo CSV
+        </button>
+        <button type="button" onClick={exportDailyCsv} className="rounded-md border-2 border-black bg-white px-4 py-2 text-sm font-bold hover:bg-yellow-100">
+          Esporta andamento CSV
+        </button>
+        <button type="button" onClick={exportUsersCsv} className="rounded-md border-2 border-black bg-white px-4 py-2 text-sm font-bold hover:bg-yellow-100">
+          Esporta storico persone CSV
+        </button>
+        <button type="button" onClick={exportJsonReport} className="rounded-md border-2 border-black bg-black px-4 py-2 text-sm font-bold text-white hover:bg-zinc-800">
+          Esporta report JSON
+        </button>
+      </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Metric label="Utenti attivi" value={activeUsers} />
         <Metric label="Movimenti totali" value={entries.length} />
@@ -1209,13 +1674,13 @@ function Statistics({ users, entries }: { users: User[]; entries: DailyEntry[] }
           <ResponsiveTable
             headers={["Data", "Pren.", "Pres.", "Ass.", "Extra"]}
             rows={recentDates.map((date) => {
-              const dayEntries = entries.filter((entry) => entry.date === date);
+              const day = dailyRows.find((row) => row.date === date);
               return [
                 formatDateKey(date),
-                countStatus(dayEntries, "Prenotato"),
-                countStatus(dayEntries, "Presente"),
-                countStatus(dayEntries, "Assente"),
-                countStatus(dayEntries, "Senza prenotazione"),
+                day?.booked ?? 0,
+                day?.present ?? 0,
+                day?.absent ?? 0,
+                day?.walkIns ?? 0,
               ];
             })}
           />
@@ -1367,6 +1832,7 @@ function UsersRegistry({
   const [filter, setFilter] = useState<"all" | "active" | "inactive">("active");
   const [editing, setEditing] = useState<User | null>(null);
   const [creating, setCreating] = useState(false);
+  const [qrUser, setQrUser] = useState<User | null>(null);
 
   const filtered = sortUsers(
     users.filter((user) => {
@@ -1410,9 +1876,18 @@ function UsersRegistry({
         </button>
       </div>
       <ResponsiveTable
-        headers={["Tessera", "Nome", "Cognome", "Telefono", "Stato", "Note", "Azioni"]}
+        headers={["Tessera", "QR", "Nome", "Cognome", "Telefono", "Stato", "Note", "Azioni"]}
         rows={filtered.map((user) => [
           user.cardNumber,
+          <button
+            key="qr"
+            type="button"
+            onClick={() => setQrUser(user)}
+            className="rounded-md p-1 text-left hover:bg-yellow-100"
+            title={`Apri QR tessera ${user.cardNumber}`}
+          >
+            <QrPreview value={qrPayload(user)} label={`QR tessera ${user.cardNumber}`} />
+          </button>,
           user.firstName,
           user.lastName,
           user.phone || "-",
@@ -1424,6 +1899,9 @@ function UsersRegistry({
             </button>
             <button className="h-10 rounded-md border-2 border-black bg-yellow-400 px-3 font-semibold text-black hover:bg-yellow-300" onClick={() => onToggleActive(user.id)}>
               {user.active ? "Disattiva" : "Attiva"}
+            </button>
+            <button className="h-10 rounded-md border-2 border-black bg-white px-3 font-semibold text-black hover:bg-yellow-100" onClick={() => setQrUser(user)}>
+              QR
             </button>
             <button className="h-10 rounded-md border-2 border-black bg-white px-3 font-semibold text-black hover:bg-yellow-100" onClick={() => onDelete(user.id)}>
               Elimina
@@ -1447,7 +1925,47 @@ function UsersRegistry({
           }}
         />
       ) : null}
+      {qrUser ? <QrModal user={qrUser} onClose={() => setQrUser(null)} /> : null}
     </section>
+  );
+}
+
+function QrModal({ user, onClose }: { user: User; onClose: () => void }) {
+  const payload = qrPayload(user);
+
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-md border-2 border-black bg-white p-5 shadow-xl">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold">QR tessera</h2>
+            <p className="mt-1 text-sm text-zinc-700">
+              {user.cardNumber} - {user.firstName} {user.lastName}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="h-10 rounded-md border-2 border-black px-3 font-semibold hover:bg-yellow-100">
+            Chiudi
+          </button>
+        </div>
+        <div className="grid place-items-center rounded-md border-2 border-black bg-white p-5">
+          <div
+            className="h-80 w-80 max-w-full"
+            dangerouslySetInnerHTML={{ __html: qrSvgMarkup(payload, { title: `${user.cardNumber} - ${user.firstName} ${user.lastName}`, size: 320 }) }}
+          />
+        </div>
+        <p className="mt-3 rounded-md border-2 border-black bg-yellow-100 p-3 text-sm font-semibold">
+          Contenuto QR: {payload}
+        </p>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <button type="button" onClick={() => downloadQrSvg(user)} className="h-12 rounded-md border-2 border-black bg-yellow-400 px-4 font-bold text-black hover:bg-yellow-300">
+            Scarica SVG
+          </button>
+          <button type="button" onClick={() => downloadQrPng(user)} className="h-12 rounded-md border-2 border-black bg-black px-4 font-bold text-white hover:bg-zinc-800">
+            Scarica PNG
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

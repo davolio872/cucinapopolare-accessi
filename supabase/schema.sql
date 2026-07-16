@@ -202,8 +202,8 @@ begin
     raise exception 'PIN non valido' using errcode = '28000';
   end if;
 
-  delete from public.cpg_daily_entries;
-  delete from public.cpg_users;
+  delete from public.cpg_daily_entries where true;
+  delete from public.cpg_users where true;
 
   insert into public.cpg_users (
     id, card_number, first_name, last_name, phone, active, notes, updated_at
@@ -474,6 +474,79 @@ to authenticated
 using (public.cpg_is_admin())
 with check (public.cpg_is_admin());
 
+create or replace function public.cpg_current_booking_entry_date()
+returns date
+language plpgsql
+stable
+set search_path = public, pg_temp
+as $$
+declare
+  v_today date := (now() at time zone 'Europe/Rome')::date;
+  v_time time := (now() at time zone 'Europe/Rome')::time;
+  v_weekday integer := extract(dow from (now() at time zone 'Europe/Rome')::date);
+  v_candidate date;
+  v_offset integer;
+begin
+  if v_time >= time '14:00' then
+    for v_offset in 1..8 loop
+      v_candidate := v_today + v_offset;
+      if extract(dow from v_candidate) between 2 and 5 then
+        return v_candidate;
+      end if;
+    end loop;
+  end if;
+
+  if v_time <= time '10:45' and v_weekday between 2 and 5 then
+    return v_today;
+  end if;
+
+  if v_weekday not between 2 and 5 then
+    for v_offset in 0..7 loop
+      v_candidate := v_today + v_offset;
+      if extract(dow from v_candidate) between 2 and 5 then
+        return v_candidate;
+      end if;
+    end loop;
+  end if;
+
+  return null::date;
+end;
+$$;
+
+grant execute on function public.cpg_current_booking_entry_date() to anon, authenticated;
+
+create or replace function public.cpg_enforce_booking_window()
+returns trigger
+language plpgsql
+set search_path = public, pg_temp
+as $$
+declare
+  v_entry_date date;
+begin
+  if new.status = 'Prenotato'
+    and (
+      tg_op = 'INSERT'
+      or old.status is distinct from new.status
+      or old.entry_date is distinct from new.entry_date
+    )
+  then
+    v_entry_date := public.cpg_current_booking_entry_date();
+
+    if v_entry_date is null or new.entry_date <> v_entry_date then
+      raise exception 'Prenotazioni consentite dalle 14:00 del giorno prima fino alle 10:45 del giorno del pranzo, solo per i pranzi da martedì a venerdì.'
+        using errcode = '22023';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists cpg_daily_entries_enforce_booking_window on public.cpg_daily_entries;
+create trigger cpg_daily_entries_enforce_booking_window
+before insert or update on public.cpg_daily_entries
+for each row execute function public.cpg_enforce_booking_window();
+
 create or replace function public.cpg_request_booking_by_phone(
   p_phone_e164 text,
   p_channel text,
@@ -492,6 +565,7 @@ declare
   v_booked_count integer;
   v_log_id uuid;
   v_waitlisted boolean := false;
+  v_entry_date date;
 begin
   if not public.cpg_is_active_volunteer() then
     raise exception 'Operatore non autorizzato' using errcode = '28000';
@@ -543,13 +617,29 @@ begin
     );
   end if;
 
+  v_entry_date := public.cpg_current_booking_entry_date();
+
+  if v_entry_date is null then
+    update public.cpg_communication_logs
+    set user_id = v_contact.user_id,
+        status = 'prenotazioni_chiuse',
+        metadata = jsonb_build_object('requested_entry_date', p_entry_date)
+    where id = v_log_id;
+
+    return jsonb_build_object(
+      'ok', false,
+      'code', 'prenotazioni_chiuse',
+      'message', 'Prenotazioni chiuse. Puoi prenotare dalle 14:00 del giorno prima fino alle 10:45 del giorno del pranzo. La Cucina Popolare accetta prenotazioni per i pranzi da martedì a venerdì.'
+    );
+  end if;
+
   select * into v_settings
   from public.cpg_booking_settings
   where id = 1;
 
   select count(*) into v_booked_count
   from public.cpg_daily_entries
-  where entry_date = p_entry_date
+  where entry_date = v_entry_date
     and status in ('Prenotato', 'Presente');
 
   if v_booked_count >= coalesce(v_settings.daily_capacity, 120) then
@@ -557,7 +647,7 @@ begin
       insert into public.cpg_waitlist (
         user_id, entry_date, requested_channel, source_phone
       )
-      values (v_contact.user_id, p_entry_date, p_channel, p_phone_e164)
+      values (v_contact.user_id, v_entry_date, p_channel, p_phone_e164)
       on conflict (user_id, entry_date) do nothing;
 
       v_waitlisted := true;
@@ -566,7 +656,7 @@ begin
     update public.cpg_communication_logs
     set user_id = v_contact.user_id,
         status = case when v_waitlisted then 'lista_attesa' else 'capienza_esaurita' end,
-        metadata = jsonb_build_object('entry_date', p_entry_date)
+        metadata = jsonb_build_object('entry_date', v_entry_date)
     where id = v_log_id;
 
     return jsonb_build_object(
@@ -580,7 +670,7 @@ begin
     user_id, entry_date, status, booking_channel, source_phone, booked_at, updated_at
   )
   values (
-    v_contact.user_id, p_entry_date, 'Prenotato', p_channel, p_phone_e164, now(), now()
+    v_contact.user_id, v_entry_date, 'Prenotato', p_channel, p_phone_e164, now(), now()
   )
   on conflict (user_id, entry_date) do update
   set status = case
@@ -596,14 +686,14 @@ begin
   update public.cpg_communication_logs
   set user_id = v_contact.user_id,
       status = 'prenotazione_confermata',
-      metadata = jsonb_build_object('entry_date', p_entry_date)
+      metadata = jsonb_build_object('entry_date', v_entry_date)
   where id = v_log_id;
 
   return jsonb_build_object(
     'ok', true,
     'code', 'prenotazione_confermata',
     'userId', v_contact.user_id,
-    'date', p_entry_date,
+    'date', v_entry_date,
     'message', 'Prenotazione confermata.'
   );
 end;
@@ -630,6 +720,7 @@ declare
   v_booked_count integer;
   v_log_id uuid;
   v_waitlisted boolean := false;
+  v_entry_date date;
 begin
   if not public.cpg_webhook_secret_ok(p_secret) then
     raise exception 'Webhook non autorizzato' using errcode = '28000';
@@ -681,13 +772,29 @@ begin
     );
   end if;
 
+  v_entry_date := public.cpg_current_booking_entry_date();
+
+  if v_entry_date is null then
+    update public.cpg_communication_logs
+    set user_id = v_contact.user_id,
+        status = 'prenotazioni_chiuse',
+        metadata = jsonb_build_object('requested_entry_date', p_entry_date)
+    where id = v_log_id;
+
+    return jsonb_build_object(
+      'ok', false,
+      'code', 'prenotazioni_chiuse',
+      'message', 'Prenotazioni chiuse. Puoi prenotare dalle 14:00 del giorno prima fino alle 10:45 del giorno del pranzo. La Cucina Popolare accetta prenotazioni per i pranzi da martedì a venerdì.'
+    );
+  end if;
+
   select * into v_settings
   from public.cpg_booking_settings
   where id = 1;
 
   select count(*) into v_booked_count
   from public.cpg_daily_entries
-  where entry_date = p_entry_date
+  where entry_date = v_entry_date
     and status in ('Prenotato', 'Presente');
 
   if v_booked_count >= coalesce(v_settings.daily_capacity, 120) then
@@ -695,7 +802,7 @@ begin
       insert into public.cpg_waitlist (
         user_id, entry_date, requested_channel, source_phone
       )
-      values (v_contact.user_id, p_entry_date, p_channel, p_phone_e164)
+      values (v_contact.user_id, v_entry_date, p_channel, p_phone_e164)
       on conflict (user_id, entry_date) do nothing;
 
       v_waitlisted := true;
@@ -704,7 +811,7 @@ begin
     update public.cpg_communication_logs
     set user_id = v_contact.user_id,
         status = case when v_waitlisted then 'lista_attesa' else 'capienza_esaurita' end,
-        metadata = jsonb_build_object('entry_date', p_entry_date)
+        metadata = jsonb_build_object('entry_date', v_entry_date)
     where id = v_log_id;
 
     return jsonb_build_object(
@@ -718,7 +825,7 @@ begin
     user_id, entry_date, status, booking_channel, source_phone, booked_at, updated_at
   )
   values (
-    v_contact.user_id, p_entry_date, 'Prenotato', p_channel, p_phone_e164, now(), now()
+    v_contact.user_id, v_entry_date, 'Prenotato', p_channel, p_phone_e164, now(), now()
   )
   on conflict (user_id, entry_date) do update
   set status = case
@@ -734,14 +841,14 @@ begin
   update public.cpg_communication_logs
   set user_id = v_contact.user_id,
       status = 'prenotazione_confermata',
-      metadata = jsonb_build_object('entry_date', p_entry_date)
+      metadata = jsonb_build_object('entry_date', v_entry_date)
   where id = v_log_id;
 
   return jsonb_build_object(
     'ok', true,
     'code', 'prenotazione_confermata',
     'userId', v_contact.user_id,
-    'date', p_entry_date,
+    'date', v_entry_date,
     'message', 'Prenotazione confermata.'
   );
 end;
