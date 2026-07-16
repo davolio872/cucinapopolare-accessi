@@ -912,6 +912,21 @@ export function CucinaApp({
     });
   }
 
+  function openCalendarHistory() {
+    setActiveSection("calendario");
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  }
+
+  function navigateToSection(section: SectionId) {
+    if (section === "statistiche") setStatisticsFocus(null);
+    setActiveSection(section);
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  }
+
   function setEntry(userId: string, status: AttendanceStatus, entryTime?: string) {
     const existing = state.entries.find(
       (entry) => entry.userId === userId && entry.date === today,
@@ -1049,7 +1064,7 @@ export function CucinaApp({
   return (
     <div className="min-h-screen bg-white text-black">
       <div className="flex min-h-screen">
-        <aside className="hidden w-72 shrink-0 border-r-2 border-black bg-white p-5 md:block">
+        <aside className="sticky top-0 hidden h-screen w-72 shrink-0 overflow-y-auto border-r-2 border-black bg-white p-5 md:block">
           <Brand />
           <nav className="mt-8 space-y-2">
             {availableSections.map((section) => (
@@ -1057,7 +1072,7 @@ export function CucinaApp({
                 key={section.id}
                 section={section}
                 active={activeSection === section.id}
-                onClick={() => setActiveSection(section.id)}
+                onClick={() => navigateToSection(section.id)}
               />
             ))}
           </nav>
@@ -1084,7 +1099,7 @@ export function CucinaApp({
               <UserMenu volunteer={volunteer} />
               <select
                 value={activeSection}
-                onChange={(event) => setActiveSection(event.target.value as SectionId)}
+                onChange={(event) => navigateToSection(event.target.value as SectionId)}
                 className="h-12 rounded-md border-2 border-black bg-white px-3 text-base font-semibold md:hidden"
                 aria-label="Menu sezioni"
               >
@@ -1107,7 +1122,7 @@ export function CucinaApp({
             {activeSection === "dashboard" && accessRole === "admin" ? (
               <Dashboard
                 stats={stats}
-                setActiveSection={setActiveSection}
+                setActiveSection={navigateToSection}
                 sections={availableSections}
               />
             ) : null}
@@ -1126,7 +1141,12 @@ export function CucinaApp({
               <CalendarHistory users={state.users} entries={state.entries} onOpenStatistics={openStatistics} />
             ) : null}
             {activeSection === "statistiche" && accessRole === "admin" ? (
-              <Statistics users={state.users} entries={state.entries} focus={statisticsFocus} />
+              <Statistics
+                users={state.users}
+                entries={state.entries}
+                focus={statisticsFocus}
+                onBackToHistory={openCalendarHistory}
+              />
             ) : null}
             {activeSection === "comunicazioni" && accessRole === "admin" ? (
               <Communications
@@ -1794,10 +1814,12 @@ function Statistics({
   users,
   entries,
   focus,
+  onBackToHistory,
 }: {
   users: User[];
   entries: DailyEntry[];
   focus: StatisticsFocus;
+  onBackToHistory: () => void;
 }) {
   const bookedLike = entries.filter((entry) => entry.status === "Prenotato" || entry.status === "Presente");
   const present = countStatus(entries, "Presente");
@@ -1948,6 +1970,15 @@ function Statistics({
         title="Statistiche"
         description="Leggi andamento, presenze, assenze e canali di prenotazione sullo storico disponibile."
       />
+      {focus ? (
+        <button
+          type="button"
+          onClick={onBackToHistory}
+          className="mb-4 rounded-md border-2 border-black bg-white px-4 py-2 text-sm font-bold hover:bg-yellow-100"
+        >
+          Torna a calendario e storico
+        </button>
+      ) : null}
       {focusedUser ? (
         <div className="mb-5 rounded-md border-2 border-black bg-yellow-100 p-4">
           <p className="text-sm font-bold uppercase text-zinc-700">Dettaglio persona selezionata</p>
