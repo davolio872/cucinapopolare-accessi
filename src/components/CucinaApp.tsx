@@ -1612,7 +1612,7 @@ function CalendarHistory({ users, entries }: { users: User[]; entries: DailyEntr
   const [selectedUserId, setSelectedUserId] = useState("");
   const monthDays = useMemo(() => getMonthDays(month), [month]);
   const filteredUsers = useMemo(
-    () => sortUsers(users.filter((user) => matchesUser(user, query))).slice(0, 10),
+    () => sortUsers(users.filter((user) => matchesUser(user, query))),
     [query, users],
   );
   const selectedDayEntries = entries.filter((entry) => entry.date === selectedDate);
@@ -1702,7 +1702,13 @@ function CalendarHistory({ users, entries }: { users: User[]; entries: DailyEntr
             className="mt-3 h-12 w-full rounded-md border-2 border-black px-3"
             placeholder="Cerca nome, tessera o telefono"
           />
-          <div className="mt-3 grid max-h-72 gap-2 overflow-y-auto">
+          <div className="mt-2 flex items-center justify-between gap-3 text-sm text-zinc-700">
+            <span>{filteredUsers.length} persone trovate</span>
+            {!query.trim() && filteredUsers.length > 30 ? (
+              <span className="font-semibold">Cerca per nome, tessera o telefono per filtrare.</span>
+            ) : null}
+          </div>
+          <div className="mt-3 grid max-h-96 gap-2 overflow-y-auto pr-1">
             {filteredUsers.map((user) => (
               <button
                 key={user.id}
@@ -1719,6 +1725,11 @@ function CalendarHistory({ users, entries }: { users: User[]; entries: DailyEntr
               </button>
             ))}
           </div>
+          {!filteredUsers.length ? (
+            <p className="mt-4 rounded-md border-2 border-black bg-yellow-100 p-3 text-sm font-semibold">
+              Nessuna persona trovata con questa ricerca.
+            </p>
+          ) : null}
           {selectedUser ? (
             <div className="mt-5">
               <h3 className="font-bold">
