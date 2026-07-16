@@ -96,9 +96,9 @@ function readQrFromVideo(video: HTMLVideoElement, canvas: HTMLCanvasElement) {
 const sections: { id: SectionId; label: string; icon: string }[] = [
   { id: "dashboard", label: "Dashboard", icon: "⌂" },
   { id: "prenotazioni", label: "Prenotazioni", icon: "✓" },
-  { id: "ingresso", label: "Nuovo ingresso", icon: "+" },
   { id: "calendario", label: "Calendario", icon: "C" },
   { id: "statistiche", label: "Statistiche", icon: "%" },
+  { id: "ingresso", label: "Nuovo ingresso", icon: "+" },
   { id: "comunicazioni", label: "Comunicazioni", icon: "M" },
   { id: "utenti", label: "Anagrafica", icon: "◉" },
   { id: "tessere", label: "Tessere utenti", icon: "QR" },
@@ -772,7 +772,7 @@ function placeFormatBits(modules: boolean[][], reserved: boolean[][], mask: numb
 }
 
 function formatBits(mask: number) {
-  let data = (0b01 << 3) | mask;
+  const data = (0b01 << 3) | mask;
   let value = data << 10;
   const generator = 0b10100110111;
   for (let bit = 14; bit >= 10; bit -= 1) {
