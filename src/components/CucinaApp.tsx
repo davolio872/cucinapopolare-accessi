@@ -36,6 +36,11 @@ type SectionId =
   | "tessere"
   | "importa";
 
+type StatisticsFocus =
+  | { type: "user"; userId: string }
+  | { type: "date"; date: string }
+  | null;
+
 const storageKey = "cucina-popolare-demo-state-v1";
 const today = todayKey();
 
@@ -827,6 +832,7 @@ export function CucinaApp({
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [statisticsFocus, setStatisticsFocus] = useState<StatisticsFocus>(null);
   const supabase = useMemo(
     () => (dataMode === "supabase" ? createClient() : null),
     [dataMode],
@@ -896,6 +902,14 @@ export function CucinaApp({
         showNotice("Aggiornamento non riuscito. Controlla connessione e permessi Supabase.");
       })
       .finally(() => setRefreshing(false));
+  }
+
+  function openStatistics(focus: StatisticsFocus = null) {
+    setStatisticsFocus(focus);
+    setActiveSection("statistiche");
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
   }
 
   function setEntry(userId: string, status: AttendanceStatus, entryTime?: string) {
@@ -1109,10 +1123,10 @@ export function CucinaApp({
               />
             ) : null}
             {activeSection === "calendario" && accessRole === "admin" ? (
-              <CalendarHistory users={state.users} entries={state.entries} />
+              <CalendarHistory users={state.users} entries={state.entries} onOpenStatistics={openStatistics} />
             ) : null}
             {activeSection === "statistiche" && accessRole === "admin" ? (
-              <Statistics users={state.users} entries={state.entries} />
+              <Statistics users={state.users} entries={state.entries} focus={statisticsFocus} />
             ) : null}
             {activeSection === "comunicazioni" && accessRole === "admin" ? (
               <Communications
@@ -1605,7 +1619,15 @@ function NewEntry({
   );
 }
 
-function CalendarHistory({ users, entries }: { users: User[]; entries: DailyEntry[] }) {
+function CalendarHistory({
+  users,
+  entries,
+  onOpenStatistics,
+}: {
+  users: User[];
+  entries: DailyEntry[];
+  onOpenStatistics: (focus: StatisticsFocus) => void;
+}) {
   const [month, setMonth] = useState(currentMonthKey());
   const [selectedDate, setSelectedDate] = useState(today);
   const [query, setQuery] = useState("");
@@ -1659,7 +1681,10 @@ function CalendarHistory({ users, entries }: { users: User[]; entries: DailyEntr
                 <button
                   key={day}
                   type="button"
-                  onClick={() => setSelectedDate(day)}
+                  onClick={() => {
+                    setSelectedDate(day);
+                    if (dayEntries.length) onOpenStatistics({ type: "date", date: day });
+                  }}
                   className={`min-h-20 rounded-md border-2 border-black p-2 text-left transition ${
                     isSelected ? "bg-yellow-400" : "bg-white hover:bg-yellow-100"
                   }`}
@@ -1713,7 +1738,10 @@ function CalendarHistory({ users, entries }: { users: User[]; entries: DailyEntr
               <button
                 key={user.id}
                 type="button"
-                onClick={() => setSelectedUserId(user.id)}
+                onClick={() => {
+                  setSelectedUserId(user.id);
+                  onOpenStatistics({ type: "user", userId: user.id });
+                }}
                 className={`rounded-md border-2 border-black p-3 text-left ${
                   selectedUserId === user.id ? "bg-yellow-100" : "bg-white hover:bg-yellow-100"
                 }`}
@@ -1760,7 +1788,15 @@ function CalendarHistory({ users, entries }: { users: User[]; entries: DailyEntr
   );
 }
 
-function Statistics({ users, entries }: { users: User[]; entries: DailyEntry[] }) {
+function Statistics({
+  users,
+  entries,
+  focus,
+}: {
+  users: User[];
+  entries: DailyEntry[];
+  focus: StatisticsFocus;
+}) {
   const bookedLike = entries.filter((entry) => entry.status === "Prenotato" || entry.status === "Presente");
   const present = countStatus(entries, "Presente");
   const absent = countStatus(entries, "Assente");
@@ -1807,6 +1843,9 @@ function Statistics({ users, entries }: { users: User[]; entries: DailyEntry[] }
     })
     .filter((row) => row.total > 0)
     .sort((a, b) => b.total - a.total || a.user.cardNumber.localeCompare(b.user.cardNumber, "it"));
+  const focusedUser = focus?.type === "user" ? users.find((user) => user.id === focus.userId) : undefined;
+  const focusedUserEntries = focusedUser ? entries.filter((entry) => entry.userId === focusedUser.id) : [];
+  const focusedDateEntries = focus?.type === "date" ? entries.filter((entry) => entry.date === focus.date) : [];
 
   function exportSummaryCsv() {
     downloadTextFile(
@@ -1907,6 +1946,65 @@ function Statistics({ users, entries }: { users: User[]; entries: DailyEntry[] }
         title="Statistiche"
         description="Leggi andamento, presenze, assenze e canali di prenotazione sullo storico disponibile."
       />
+      {focusedUser ? (
+        <div className="mb-5 rounded-md border-2 border-black bg-yellow-100 p-4">
+          <p className="text-sm font-bold uppercase text-zinc-700">Dettaglio persona selezionata</p>
+          <h2 className="mt-1 text-xl font-bold">
+            Tessera {focusedUser.cardNumber} - {focusedUser.firstName} {focusedUser.lastName}
+          </h2>
+          <div className="mt-3 grid gap-2 sm:grid-cols-4">
+            <Metric label="Movimenti" value={focusedUserEntries.length} small />
+            <Metric label="Presenze" value={countStatus(focusedUserEntries, "Presente")} small />
+            <Metric label="Assenze" value={countStatus(focusedUserEntries, "Assente")} small />
+            <Metric label="Extra" value={countStatus(focusedUserEntries, "Senza prenotazione")} small />
+          </div>
+          <div className="mt-4">
+            <ResponsiveTable
+              headers={["Data", "Stato", "Canale", "Ora"]}
+              rows={focusedUserEntries
+                .sort((a, b) => b.date.localeCompare(a.date))
+                .slice(0, 8)
+                .map((entry) => [
+                  formatDateKey(entry.date),
+                  <Badge key="badge" status={entry.status} />,
+                  channelLabel(entry.bookingChannel),
+                  entry.entryTime || "-",
+                ])}
+            />
+          </div>
+        </div>
+      ) : null}
+      {focus?.type === "date" ? (
+        <div className="mb-5 rounded-md border-2 border-black bg-yellow-100 p-4">
+          <p className="text-sm font-bold uppercase text-zinc-700">Dettaglio giorno selezionato</p>
+          <h2 className="mt-1 text-xl font-bold">{formatDateKey(focus.date)}</h2>
+          <div className="mt-3 grid gap-2 sm:grid-cols-4">
+            <Metric label="Prenotati" value={countStatus(focusedDateEntries, "Prenotato")} small />
+            <Metric label="Presenti" value={countStatus(focusedDateEntries, "Presente")} small />
+            <Metric label="Assenti" value={countStatus(focusedDateEntries, "Assente")} small />
+            <Metric label="Extra" value={countStatus(focusedDateEntries, "Senza prenotazione")} small />
+          </div>
+          <div className="mt-4">
+            <ResponsiveTable
+              headers={["Tessera", "Nome", "Cognome", "Stato", "Canale", "Ora"]}
+              rows={focusedDateEntries
+                .map((entry) => ({
+                  entry,
+                  user: users.find((user) => user.id === entry.userId),
+                }))
+                .filter((row): row is { entry: DailyEntry; user: User } => Boolean(row.user))
+                .map(({ entry, user }) => [
+                  user.cardNumber,
+                  user.firstName,
+                  user.lastName,
+                  <Badge key="badge" status={entry.status} />,
+                  channelLabel(entry.bookingChannel),
+                  entry.entryTime || "-",
+                ])}
+            />
+          </div>
+        </div>
+      ) : null}
       <div className="mb-5 flex flex-wrap gap-2">
         <button type="button" onClick={exportSummaryCsv} className="rounded-md border-2 border-black bg-yellow-400 px-4 py-2 text-sm font-bold hover:bg-yellow-300">
           Esporta riepilogo CSV
