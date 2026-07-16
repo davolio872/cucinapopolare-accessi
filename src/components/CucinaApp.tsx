@@ -33,6 +33,7 @@ type SectionId =
   | "statistiche"
   | "comunicazioni"
   | "utenti"
+  | "tessere"
   | "importa";
 
 const storageKey = "cucina-popolare-demo-state-v1";
@@ -100,6 +101,7 @@ const sections: { id: SectionId; label: string; icon: string }[] = [
   { id: "statistiche", label: "Statistiche", icon: "%" },
   { id: "comunicazioni", label: "Comunicazioni", icon: "M" },
   { id: "utenti", label: "Anagrafica", icon: "◉" },
+  { id: "tessere", label: "Tessere utenti", icon: "QR" },
   { id: "importa", label: "Importa Excel", icon: "⇩" },
 ];
 
@@ -307,6 +309,269 @@ function downloadQrPng(user: User) {
   document.body.appendChild(link);
   link.click();
   link.remove();
+}
+
+function loadCanvasImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new window.Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("image-load-error"));
+    image.src = src;
+  });
+}
+
+function drawQrOnCanvas(
+  context: CanvasRenderingContext2D,
+  user: User,
+  x: number,
+  y: number,
+  size: number,
+) {
+  const matrix = createQrMatrix(qrPayload(user));
+  const moduleSize = Math.floor(size / matrix.length);
+  const qrImageSize = moduleSize * matrix.length;
+  const offset = Math.floor((size - qrImageSize) / 2);
+
+  context.fillStyle = "#ffffff";
+  context.fillRect(x, y, size, size);
+  context.fillStyle = "#000000";
+  matrix.forEach((row, rowIndex) => {
+    row.forEach((filled, columnIndex) => {
+      if (filled) {
+        context.fillRect(
+          x + offset + columnIndex * moduleSize,
+          y + offset + rowIndex * moduleSize,
+          moduleSize,
+          moduleSize,
+        );
+      }
+    });
+  });
+}
+
+function fitCanvasText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  fontTemplate: (size: number) => string,
+  initialSize: number,
+  minSize: number,
+) {
+  let size = initialSize;
+  context.font = fontTemplate(size);
+  while (context.measureText(text).width > maxWidth && size > minSize) {
+    size -= 2;
+    context.font = fontTemplate(size);
+  }
+  return size;
+}
+
+async function createBadgeJpgDataUrl(user: User) {
+  const canvas = document.createElement("canvas");
+  const width = 1014;
+  const height = 638;
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d");
+  if (!context) return "";
+
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  context.strokeStyle = "#000000";
+  context.lineWidth = 18;
+  context.strokeRect(9, 9, width - 18, height - 18);
+
+  context.fillStyle = "#facc15";
+  context.fillRect(0, 0, width, 112);
+  context.fillStyle = "#000000";
+  context.fillRect(0, height - 92, width, 92);
+
+  try {
+    const logo = await loadCanvasImage("/logo-cucina-popolare.png");
+    const logoSize = 150;
+    context.fillStyle = "#ffffff";
+    context.fillRect(40, 20, logoSize, logoSize);
+    context.drawImage(logo, 40, 20, logoSize, logoSize);
+  } catch {
+    context.fillStyle = "#000000";
+    context.font = "700 36px Arial, sans-serif";
+    context.fillText("CPG", 56, 96);
+  }
+
+  context.fillStyle = "#000000";
+  context.font = "900 44px Arial, sans-serif";
+  context.fillText("CUCINA POPOLARE", 220, 56);
+  context.font = "700 34px Arial, sans-serif";
+  context.fillText("GENOVESE", 220, 98);
+
+  drawQrOnCanvas(context, user, 62, 202, 356);
+  context.strokeStyle = "#000000";
+  context.lineWidth = 8;
+  context.strokeRect(62, 202, 356, 356);
+
+  const fullName = `${user.firstName} ${user.lastName}`.trim().toUpperCase();
+  context.fillStyle = "#000000";
+  context.font = "800 34px Arial, sans-serif";
+  context.fillText("TESSERA", 480, 238);
+  context.font = "900 118px Arial, sans-serif";
+  context.fillText(user.cardNumber, 480, 360);
+
+  fitCanvasText(context, fullName, 470, (size) => `900 ${size}px Arial, sans-serif`, 58, 34);
+  context.fillText(fullName, 480, 450);
+
+  context.fillStyle = "#ffffff";
+  context.font = "700 30px Arial, sans-serif";
+  context.fillText("Accesso tramite prenotazione", 44, height - 35);
+
+  return canvas.toDataURL("image/jpeg", 0.95);
+}
+
+async function downloadBadgeJpg(user: User) {
+  const dataUrl = await createBadgeJpgDataUrl(user);
+  if (!dataUrl) return;
+  const link = document.createElement("a");
+  link.download = `${qrFileBase(user)}.jpg`;
+  link.href = dataUrl;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function dataUrlToBytes(dataUrl: string) {
+  const base64 = dataUrl.split(",")[1] ?? "";
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function crc32(bytes: Uint8Array) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function dosDateTime(date = new Date()) {
+  const year = Math.max(date.getFullYear(), 1980);
+  const time =
+    (date.getHours() << 11)
+    | (date.getMinutes() << 5)
+    | Math.floor(date.getSeconds() / 2);
+  const day =
+    ((year - 1980) << 9)
+    | ((date.getMonth() + 1) << 5)
+    | date.getDate();
+  return { time, day };
+}
+
+function textBytes(text: string) {
+  return new TextEncoder().encode(text);
+}
+
+function uint16(value: number) {
+  return [value & 0xff, (value >>> 8) & 0xff];
+}
+
+function uint32(value: number) {
+  return [
+    value & 0xff,
+    (value >>> 8) & 0xff,
+    (value >>> 16) & 0xff,
+    (value >>> 24) & 0xff,
+  ];
+}
+
+function toArrayBuffer(bytes: Uint8Array) {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
+function createStoredZip(files: { name: string; data: Uint8Array }[]) {
+  const localParts: Uint8Array[] = [];
+  const centralParts: Uint8Array[] = [];
+  let offset = 0;
+  const { time, day } = dosDateTime();
+
+  for (const file of files) {
+    const name = textBytes(file.name);
+    const checksum = crc32(file.data);
+    const localHeader = new Uint8Array([
+      ...uint32(0x04034b50),
+      ...uint16(20),
+      ...uint16(0),
+      ...uint16(0),
+      ...uint16(time),
+      ...uint16(day),
+      ...uint32(checksum),
+      ...uint32(file.data.length),
+      ...uint32(file.data.length),
+      ...uint16(name.length),
+      ...uint16(0),
+    ]);
+    localParts.push(localHeader, name, file.data);
+
+    const centralHeader = new Uint8Array([
+      ...uint32(0x02014b50),
+      ...uint16(20),
+      ...uint16(20),
+      ...uint16(0),
+      ...uint16(0),
+      ...uint16(time),
+      ...uint16(day),
+      ...uint32(checksum),
+      ...uint32(file.data.length),
+      ...uint32(file.data.length),
+      ...uint16(name.length),
+      ...uint16(0),
+      ...uint16(0),
+      ...uint16(0),
+      ...uint16(0),
+      ...uint32(0),
+      ...uint32(offset),
+    ]);
+    centralParts.push(centralHeader, name);
+    offset += localHeader.length + name.length + file.data.length;
+  }
+
+  const centralSize = centralParts.reduce((total, part) => total + part.length, 0);
+  const endRecord = new Uint8Array([
+    ...uint32(0x06054b50),
+    ...uint16(0),
+    ...uint16(0),
+    ...uint16(files.length),
+    ...uint16(files.length),
+    ...uint32(centralSize),
+    ...uint32(offset),
+    ...uint16(0),
+  ]);
+
+  return new Blob([...localParts, ...centralParts, endRecord].map(toArrayBuffer), { type: "application/zip" });
+}
+
+async function downloadBadgeZip(users: User[]) {
+  const files = [];
+  for (const user of users) {
+    const dataUrl = await createBadgeJpgDataUrl(user);
+    if (dataUrl) files.push({ name: `${qrFileBase(user)}.jpg`, data: dataUrlToBytes(dataUrl) });
+  }
+  const zip = createStoredZip(files);
+  const url = URL.createObjectURL(zip);
+  const link = document.createElement("a");
+  link.download = `tessere-utenti-cucina-popolare-${today}.zip`;
+  link.href = url;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function qrSvgMarkup(value: string, options: { title?: string; size?: number } = {}) {
@@ -861,6 +1126,9 @@ export function CucinaApp({
                 onDelete={deleteUser}
                 onToggleActive={deactivateUser}
               />
+            ) : null}
+            {activeSection === "tessere" && accessRole === "admin" ? (
+              <UserBadges users={state.users} />
             ) : null}
             {activeSection === "importa" && accessRole === "admin" ? (
               <ImportPage
@@ -1966,6 +2234,113 @@ function QrModal({ user, onClose }: { user: User; onClose: () => void }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function UserBadges({ users }: { users: User[] }) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"active" | "all">("active");
+  const [downloading, setDownloading] = useState(false);
+
+  const filtered = sortUsers(
+    users.filter((user) => {
+      if (filter === "active" && !user.active) return false;
+      return matchesUser(user, query);
+    }),
+  );
+
+  async function downloadAll() {
+    if (!filtered.length || downloading) return;
+    setDownloading(true);
+    try {
+      await downloadBadgeZip(filtered);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  return (
+    <section>
+      <SectionHeader
+        title="Tessere utenti"
+        description="Scarica le tessere in formato JPG con logo, QR, numero tessera e nominativo. Il telefono non viene stampato."
+      />
+
+      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="grid gap-3 sm:grid-cols-[1fr_220px] lg:w-2/3">
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            className="h-12 rounded-md border-2 border-black bg-white px-3"
+            placeholder="Cerca per nome o tessera"
+          />
+          <select
+            value={filter}
+            onChange={(event) => setFilter(event.target.value as typeof filter)}
+            className="h-12 rounded-md border-2 border-black bg-white px-3"
+          >
+            <option value="active">Solo utenti attivi</option>
+            <option value="all">Tutti gli utenti</option>
+          </select>
+        </div>
+        <button
+          type="button"
+          onClick={downloadAll}
+          disabled={downloading || !filtered.length}
+          className="h-12 rounded-md border-2 border-black bg-yellow-400 px-5 font-bold text-black hover:bg-yellow-300 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500"
+        >
+          {downloading ? "Preparazione ZIP..." : `Scarica ZIP con ${filtered.length} JPG`}
+        </button>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {filtered.map((user) => (
+          <article key={user.id} className="rounded-md border-2 border-black bg-white p-4">
+            <div className="overflow-hidden rounded-md border-2 border-black bg-white">
+              <div className="flex items-start gap-4 bg-yellow-400 p-3">
+                <Image
+                  src="/logo-cucina-popolare.png"
+                  alt="Cucina Popolare Genovese"
+                  width={68}
+                  height={68}
+                  className="border border-black bg-white object-contain"
+                />
+                <div className="min-w-0 pt-1">
+                  <p className="text-sm font-black leading-tight">CUCINA POPOLARE</p>
+                  <p className="text-xs font-bold leading-tight">GENOVESE</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-[116px_1fr] gap-4 p-4">
+                <QrPreview value={qrPayload(user)} label={`QR tessera ${user.cardNumber}`} />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase text-zinc-600">Tessera</p>
+                  <p className="text-4xl font-black leading-none">{user.cardNumber}</p>
+                  <p className="mt-3 break-words text-xl font-black uppercase leading-tight">
+                    {user.firstName} {user.lastName}
+                  </p>
+                </div>
+              </div>
+              <div className="bg-black px-4 py-2 text-sm font-bold text-white">
+                Accesso tramite prenotazione
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void downloadBadgeJpg(user)}
+              className="mt-3 h-11 w-full rounded-md border-2 border-black bg-black px-4 font-bold text-white hover:bg-zinc-800"
+            >
+              Scarica JPG
+            </button>
+          </article>
+        ))}
+      </div>
+
+      {!filtered.length ? (
+        <div className="rounded-md border-2 border-black bg-yellow-100 p-4 font-semibold">
+          Nessuna tessera trovata con questi filtri.
+        </div>
+      ) : null}
+    </section>
   );
 }
 
