@@ -227,6 +227,7 @@ const qrDataCodewords = 19;
 const qrEcCodewords = 7;
 const qrReserved = 2;
 const qrAlphanumericChars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
+const bookingPhoneNumber = "351 484 7182";
 
 function downloadTextFile(fileName: string, content: string, type = "text/plain;charset=utf-8") {
   const blob = new Blob([content], { type });
@@ -385,7 +386,7 @@ async function createBadgeJpgDataUrl(user: User) {
   context.fillStyle = "#facc15";
   context.fillRect(0, 0, width, 112);
   context.fillStyle = "#000000";
-  context.fillRect(0, height - 92, width, 92);
+  context.fillRect(0, height - 112, width, 112);
 
   try {
     const logo = await loadCanvasImage("/logo-cucina-popolare.png");
@@ -421,8 +422,10 @@ async function createBadgeJpgDataUrl(user: User) {
   context.fillText(fullName, 480, 450);
 
   context.fillStyle = "#ffffff";
-  context.font = "700 30px Arial, sans-serif";
-  context.fillText("Accesso tramite prenotazione", 44, height - 35);
+  context.font = "800 30px Arial, sans-serif";
+  context.fillText(`Prenota: ${bookingPhoneNumber}`, 44, height - 62);
+  context.font = "700 24px Arial, sans-serif";
+  context.fillText("Accesso tramite prenotazione", 44, height - 26);
 
   return canvas.toDataURL("image/jpeg", 0.95);
 }
@@ -2263,7 +2266,7 @@ function UserBadges({ users }: { users: User[] }) {
     <section>
       <SectionHeader
         title="Tessere utenti"
-        description="Scarica le tessere in formato JPG con logo, QR, numero tessera e nominativo. Il telefono non viene stampato."
+        description={`Scarica le tessere in formato JPG con logo, QR, numero tessera, nominativo e numero prenotazioni ${bookingPhoneNumber}. Il telefono personale dell'utente non viene stampato.`}
       />
 
       <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -2321,7 +2324,8 @@ function UserBadges({ users }: { users: User[] }) {
                 </div>
               </div>
               <div className="bg-black px-4 py-2 text-sm font-bold text-white">
-                Accesso tramite prenotazione
+                <p>Prenota: {bookingPhoneNumber}</p>
+                <p className="text-xs">Accesso tramite prenotazione</p>
               </div>
             </div>
             <button
