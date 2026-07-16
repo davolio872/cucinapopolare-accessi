@@ -1,6 +1,8 @@
-# Cucina Popolare Genovese
+# Gestionale prenotazioni 1.0
 
 Web app in italiano per gestire anagrafica, prenotazioni giornaliere, ingressi e importazione Excel/CSV della Cucina Popolare Genovese.
+
+Sviluppo: Roberto D'Avolio.
 
 ## Installazione
 
@@ -37,14 +39,14 @@ Pagine protette:
 - `/test-supabase`
 - dashboard, prenotazioni, nuovo ingresso, anagrafica e import Excel
 
-Credenziali demo locali:
+Credenziali locali:
 
 ```text
 nome utente: admin
-password demo: 1234
+password: 1234
 ```
 
-Il login demo usa dati fittizi nel `localStorage`. Per usare dati reali, accedi con un volontario creato in Supabase Auth e con record attivo in `profiles`.
+Il login locale usa dati fittizi nel `localStorage`. Per usare dati reali, accedi con un volontario creato in Supabase Auth e con record attivo in `profiles`.
 
 ## Supabase
 
@@ -319,7 +321,7 @@ Il campo `attivo` accetta `si`, `no`, `true`, `false`, `1`, `0`, `attivo`, `non 
 
 ## Limiti Attuali
 
-- Il login demo usa dati fittizi nel `localStorage`.
+- Il login locale usa dati fittizi nel `localStorage`.
 - I dati reali richiedono accesso con volontario Supabase Auth e profilo attivo.
 - Gli endpoint SMS, WhatsApp e telefonia non sono ancora collegati al provider.
 - Il gateway Android e predisposto ma va compilato e testato su telefono reale.

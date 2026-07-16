@@ -30,7 +30,8 @@ export default async function LoginPage({
             className="h-16 w-12 object-contain"
           />
           <div>
-            <h1 className="text-2xl font-bold">Cucina Popolare Genovese</h1>
+            <h1 className="text-2xl font-bold">Gestionale prenotazioni 1.0</h1>
+            <p className="text-sm font-semibold text-zinc-700">Sviluppo Roberto D&apos;Avolio</p>
             <p className="text-sm text-zinc-700">Accesso volontari</p>
           </div>
         </div>

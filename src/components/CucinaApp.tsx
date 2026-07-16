@@ -1078,7 +1078,7 @@ export function CucinaApp({
                       : accessRole === "admin"
                         ? "Supabase: accesso amministratore"
                         : "Supabase: accesso operatore"
-                    : "Modalita demo locale"}
+                    : "Modalita locale"}
                 </p>
               </div>
               <UserMenu volunteer={volunteer} />
@@ -1202,8 +1202,10 @@ function Brand({ compact = false }: { compact?: boolean }) {
         className={compact ? "h-12 w-10 object-contain" : "h-16 w-12 object-contain"}
       />
       <div>
-        <p className={compact ? "text-lg font-bold" : "text-2xl font-bold"}>Cucina Popolare Genovese</p>
-        {!compact ? <p className="text-sm text-zinc-700">Demo gestione ingressi</p> : null}
+        <p className={compact ? "text-lg font-bold" : "text-2xl font-bold"}>Gestionale prenotazioni 1.0</p>
+        {!compact ? (
+          <p className="text-sm font-semibold text-zinc-700">Sviluppo Roberto D&apos;Avolio</p>
+        ) : null}
       </div>
     </div>
   );

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Cucina Popolare Genovese",
-  description: "Demo per gestione prenotazioni, ingressi e anagrafica utenti.",
+  title: "Gestionale prenotazioni 1.0",
+  description: "Gestionale prenotazioni, ingressi e anagrafica utenti. Sviluppo Roberto D'Avolio.",
 };
 
 export default function RootLayout({
