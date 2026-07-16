@@ -137,6 +137,8 @@ function normalizePhone(value: string) {
   if (!cleaned) return "";
   if (cleaned.startsWith("+")) return cleaned;
   if (cleaned.startsWith("00")) return `+${cleaned.slice(2)}`;
+  if (cleaned.startsWith("39") && cleaned.length >= 11) return `+${cleaned}`;
+  if (cleaned.startsWith("3") && cleaned.length >= 9) return `+39${cleaned}`;
   return cleaned;
 }
 
