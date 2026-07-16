@@ -77,7 +77,7 @@ export function getBookingWindowStatus(date = new Date()) {
   return {
     isOpen: false,
     entryDate: null,
-    message: "Prenotazioni chiuse. Riaprono alle 14:00 per il prossimo pranzo utile.",
+    message: "Prenotazioni chiuse, chiama dopo le 14.00",
   };
 }
 

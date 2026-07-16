@@ -566,6 +566,7 @@ declare
   v_log_id uuid;
   v_waitlisted boolean := false;
   v_entry_date date;
+  v_already_booked boolean := false;
 begin
   if not public.cpg_is_active_volunteer() then
     raise exception 'Operatore non autorizzato' using errcode = '28000';
@@ -629,7 +630,7 @@ begin
     return jsonb_build_object(
       'ok', false,
       'code', 'prenotazioni_chiuse',
-      'message', 'Prenotazioni chiuse. Puoi prenotare dalle 14:00 del giorno prima fino alle 10:45 del giorno del pranzo. La Cucina Popolare accetta prenotazioni per i pranzi da martedì a venerdì.'
+      'message', 'Prenotazioni chiuse, chiama dopo le 14.00'
     );
   end if;
 
@@ -637,12 +638,20 @@ begin
   from public.cpg_booking_settings
   where id = 1;
 
+  select exists (
+    select 1
+    from public.cpg_daily_entries
+    where user_id = v_contact.user_id
+      and entry_date = v_entry_date
+      and status in ('Prenotato', 'Presente')
+  ) into v_already_booked;
+
   select count(*) into v_booked_count
   from public.cpg_daily_entries
   where entry_date = v_entry_date
     and status in ('Prenotato', 'Presente');
 
-  if v_booked_count >= coalesce(v_settings.daily_capacity, 120) then
+  if not v_already_booked and v_booked_count >= coalesce(v_settings.daily_capacity, 120) then
     if coalesce(v_settings.allow_waitlist, true) then
       insert into public.cpg_waitlist (
         user_id, entry_date, requested_channel, source_phone
@@ -694,7 +703,10 @@ begin
     'code', 'prenotazione_confermata',
     'userId', v_contact.user_id,
     'date', v_entry_date,
-    'message', 'Prenotazione confermata.'
+    'message', case
+      when v_already_booked then 'La tua prenotazione risulta già confermata. Ti aspettiamo. Roberto D''Avolio'
+      else 'Un pasto prenotato è un pasto salvato. Ti aspettiamo. Roberto D''Avolio'
+    end
   );
 end;
 $$;
@@ -721,6 +733,7 @@ declare
   v_log_id uuid;
   v_waitlisted boolean := false;
   v_entry_date date;
+  v_already_booked boolean := false;
 begin
   if not public.cpg_webhook_secret_ok(p_secret) then
     raise exception 'Webhook non autorizzato' using errcode = '28000';
@@ -784,7 +797,7 @@ begin
     return jsonb_build_object(
       'ok', false,
       'code', 'prenotazioni_chiuse',
-      'message', 'Prenotazioni chiuse. Puoi prenotare dalle 14:00 del giorno prima fino alle 10:45 del giorno del pranzo. La Cucina Popolare accetta prenotazioni per i pranzi da martedì a venerdì.'
+      'message', 'Prenotazioni chiuse, chiama dopo le 14.00'
     );
   end if;
 
@@ -792,12 +805,20 @@ begin
   from public.cpg_booking_settings
   where id = 1;
 
+  select exists (
+    select 1
+    from public.cpg_daily_entries
+    where user_id = v_contact.user_id
+      and entry_date = v_entry_date
+      and status in ('Prenotato', 'Presente')
+  ) into v_already_booked;
+
   select count(*) into v_booked_count
   from public.cpg_daily_entries
   where entry_date = v_entry_date
     and status in ('Prenotato', 'Presente');
 
-  if v_booked_count >= coalesce(v_settings.daily_capacity, 120) then
+  if not v_already_booked and v_booked_count >= coalesce(v_settings.daily_capacity, 120) then
     if coalesce(v_settings.allow_waitlist, true) then
       insert into public.cpg_waitlist (
         user_id, entry_date, requested_channel, source_phone
@@ -849,7 +870,10 @@ begin
     'code', 'prenotazione_confermata',
     'userId', v_contact.user_id,
     'date', v_entry_date,
-    'message', 'Prenotazione confermata.'
+    'message', case
+      when v_already_booked then 'La tua prenotazione risulta già confermata. Ti aspettiamo. Roberto D''Avolio'
+      else 'Un pasto prenotato è un pasto salvato. Ti aspettiamo. Roberto D''Avolio'
+    end
   );
 end;
 $$;
